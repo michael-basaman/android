@@ -1,12 +1,18 @@
 package com.example.freediskshredder
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.IBinder
+import android.service.notification.StatusBarNotification
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,13 +24,21 @@ import java.util.Random
 class MainService : Service() {
     companion object {
         var serviceRunning: Boolean = false
+        var isRunning: Boolean = true
+        var runCount: Int = 0
+        var serviceRunIndex = 0
+        var bytesWritten: Long = 0L
+        var freeSpace: Long = 0L
+        var debug: String = "no status"
+        var done: Boolean = false
+
         val lock = Any()
     }
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
-    private var runCount: Int = 0
-    private var isRunning: Boolean = true
+
+    private var notificationId = 0
 
     override fun onBind(intent: Intent): IBinder? {
         return null
@@ -35,9 +49,73 @@ class MainService : Service() {
         serviceJob.cancel()
     }
 
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private fun createNotificationChannel(context: Context) {
+        val name = "Free Disk Shredder"
+        val descriptionText = "Status"
+        val importance = NotificationManager.IMPORTANCE_DEFAULT
+
+        val channel = NotificationChannel("channel_id", name, importance).apply {
+            description = descriptionText
+        }
+
+        val notificationManager: NotificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    private fun getPercentValue(): String {
+        var percent = 0.0
+
+        if(freeSpace > 0) {
+            percent = bytesWritten.toDouble() / freeSpace.toDouble()
+        }
+
+        if(percent < 0.0) {
+            percent = 0.0
+        } else if(percent > 1.0) {
+            percent = 1.0
+        }
+
+        return ((percent * 1000).toInt().toDouble() / 10.0).toString()
+    }
+
+    private fun createNotification(context: Context): NotificationCompat.Builder {
+        val percentValue = getPercentValue()
+
+        return NotificationCompat.Builder(context, "free_disk_shredder")
+            .setContentTitle("Free Disk Shredder")
+            .setContentText("Run $serviceRunIndex/$runCount: $percentValue%")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun updateNotification() {
+        return withContext(Dispatchers.IO) {
+            while (isRunning) {
+                if (notificationId > 0) {
+                    val notificationManager = NotificationManagerCompat.from(this@MainService)
+
+                    try {
+                        notificationManager.notify(
+                            notificationId,
+                            createNotification(this@MainService).build()
+                        )
+                    } catch (e: Exception) {
+                        break
+                    }
+                }
+
+                try {
+                    Thread.sleep(5000L)
+                } catch (_: Exception) { }
+            }
+        }
+    }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         var shouldAbort = true
+
+        debug = "started"
 
         synchronized(lock) {
             if(!serviceRunning) {
@@ -50,30 +128,53 @@ class MainService : Service() {
             return START_NOT_STICKY
         }
 
-        val broadcastReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                val data: String? = intent.getStringExtra("data")
 
-                data?.let {
-                    val tokens = data.split(":")
 
-                    if(tokens[0] == "isRunning") {
-                        isRunning = tokens[1].toBoolean()
-                    } else if(tokens[0] == "runCount") {
-                        runCount = tokens[1].toInt()
-                    }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) {
+            createNotificationChannel(this)
+
+            val notificationManager =
+                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            val notifications: Array<StatusBarNotification> =
+                notificationManager.getActiveNotifications()
+
+            val r = Random()
+            val s = HashSet<Int>()
+            for (n in notifications) {
+                s.add(n.id)
+            }
+            var c = 0
+            var i = 0
+            while (c < 10000) {
+                i = r.nextInt(9_000_000) + 1_000_000
+                if (!s.contains(i)) {
+                    break
                 }
+                c++
+            }
+
+            if (!s.contains(i)) {
+                notificationId = i
+                notificationManager.notify(notificationId, createNotification(this).build())
             }
         }
 
-        registerReceiver(broadcastReceiver, IntentFilter("com.example.free_disk_shredder.activity"))
+         // 1 is the notification ID
+
+        debug = "not aborted"
 
         serviceScope.launch {
+            done = false
             runBackgroundTask()
+            done = true
+            serviceRunning = false
+            debug = "stopped"
         }
 
-        synchronized(lock) {
-            serviceRunning = false
+        serviceScope.launch {
+            updateNotification()
         }
 
         return START_NOT_STICKY
@@ -81,15 +182,12 @@ class MainService : Service() {
 
     private suspend fun runBackgroundTask() {
         return withContext(Dispatchers.IO) {
-            val intent = Intent("com.example.free_disk_shredder.service")
-
+            debug = "background"
+            
             val random = Random()
             val numBytes = 1024
 
             val bytes = ByteArray(numBytes)
-
-            intent.putExtra("data", "isRunning:true")
-            sendBroadcast(intent)
 
             val tinyFile = File(this@MainService.filesDir, "tiny.bin")
             val smallFile = File(this@MainService.filesDir, "small.bin")
@@ -101,29 +199,19 @@ class MainService : Service() {
                 tinyFile.writeBytes(bytes)
             }
 
-            while(isRunning && runCount <= 0) {
-                try {
-                    Thread.sleep(100)
-                } catch(_: Exception) { }
-            }
-
             for (runIndex in 1..runCount) {
-                var bytesWritten = 0L
+                bytesWritten = 0L
 
                 if (tinyFile.exists()) {
-                    val freeSpace: Long = tinyFile.freeSpace
-                    intent.putExtra("data", "freeSpace:$freeSpace")
-                    sendBroadcast(intent)
+                    freeSpace = tinyFile.freeSpace
                 }
 
-                intent.putExtra("data", "runIndex:$runIndex")
-                sendBroadcast(intent)
+                serviceRunIndex = runIndex
 
                 var hasError: Boolean = deleteFiles()
 
                 if (hasError) {
-                    intent.putExtra("data", "debug:initial")
-                    sendBroadcast(intent)
+                    debug = "initial"
                 }
 
                 if (!hasError) {
@@ -142,15 +230,9 @@ class MainService : Service() {
                                 smallFile.writeBytes(bytes)
                                 bytesWritten += 1024L
                             }
-
-                            intent.putExtra("data", "bytesWritten:$bytesWritten")
-                            sendBroadcast(intent)
                         }
                     } catch (e: Exception) {
-                        intent.putExtra("data", "bytesWritten:$bytesWritten")
-                        sendBroadcast(intent)
-                        intent.putExtra("data", "debug:small")
-                        sendBroadcast(intent)
+                        debug = "small"
                         hasError = true
                     }
                 }
@@ -171,15 +253,9 @@ class MainService : Service() {
                                 mediumFile.writeBytes(bytes)
                                 bytesWritten += 1024L
                             }
-
-                            intent.putExtra("data", "bytesWritten:$bytesWritten")
-                            sendBroadcast(intent)
                         }
                     } catch (e: Exception) {
-                        intent.putExtra("data", "bytesWritten:$bytesWritten")
-                        sendBroadcast(intent)
-                        intent.putExtra("data", "debug:medium")
-                        sendBroadcast(intent)
+                        debug = "medium"
                         hasError = true
                     }
                 }
@@ -200,27 +276,18 @@ class MainService : Service() {
                                 largeFile.writeBytes(bytes)
                                 bytesWritten += 1024L
                             }
-
-                            intent.putExtra("data", "bytesWritten:$bytesWritten")
-                            sendBroadcast(intent)
                         }
                     } catch (e: Exception) {
-                        intent.putExtra("data", "bytesWritten:$bytesWritten")
-                        sendBroadcast(intent)
-                        intent.putExtra("data", "debug:large")
-                        sendBroadcast(intent)
+                        debug = "large"
                     }
                 }
 
                 if (deleteFiles()) {
-                    intent.putExtra("data", "debug:final")
-                    sendBroadcast(intent)
+                    debug = "final"
                 }
             }
 
             isRunning = false
-            intent.putExtra("data", "isRunning:false")
-            sendBroadcast(intent)
         }
     }
 

@@ -1,10 +1,9 @@
 package com.example.freediskshredder
 
-import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
-import android.content.Context
+import android.Manifest
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
@@ -41,12 +40,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import com.example.freediskshredder.ui.theme.FreeDiskShredderTheme
 import java.io.File
 
 
 class MainActivity : ComponentActivity() {
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -54,35 +53,16 @@ class MainActivity : ComponentActivity() {
             FreeDiskShredder()
         }
 
-        val broadcastReceiver = object : BroadcastReceiver() {
-            @SuppressLint("UnsafeIntentLaunch")
-            override fun onReceive(context: Context, intent: Intent) {
-                val data: String? = intent.getStringExtra("data")
-
-                data?.let {
-                    val tokens = data.split(":")
-
-                    if(tokens[0] == "bytesWritten") {
-                        bytesWritten.longValue = tokens[1].toLong()
-                    } else if(tokens[0] == "isRunning") {
-                        isRunning.value = tokens[1].toBoolean()
-
-                        val repeatOption: Int = repeatOptions[repeatIndex.intValue].toInt()
-
-                        intent.putExtra("data", "runCount:$repeatOption")
-                        sendBroadcast(intent)
-                    } else if(tokens[0] == "runIndex") {
-                        runIndex.intValue = tokens[1].toInt()
-                    } else if(tokens[0] == "freeSpace") {
-                        freeSpace.longValue = tokens[1].toLong()
-                    } else if(tokens[0] == "debug") {
-                        debugString.value = tokens[1]
-                    }
-                }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    1
+                )
             }
         }
-
-        registerReceiver(broadcastReceiver, IntentFilter("com.example.free_disk_shredder.service"))
     }
 
     private val driveOptions = ArrayList<String>()
@@ -95,10 +75,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var driveIndex: MutableIntState
     private lateinit var repeatIndex: MutableIntState
     private lateinit var debugString: MutableState<String>
+    private lateinit var debugInt: MutableIntState
     private lateinit var bytesWritten: MutableLongState
     private lateinit var freeSpace: MutableLongState
-
-    private val intent = Intent("com.example.free_disk_shredder.activity")
 
     @Composable
     fun FreeDiskShredder() {
@@ -108,7 +87,8 @@ class MainActivity : ComponentActivity() {
         isRunning = remember { mutableStateOf(false) }
         driveIndex = remember { mutableIntStateOf(0) }
         repeatIndex = remember { mutableIntStateOf(0) }
-        debugString = remember { mutableStateOf("no status") }
+        debugString = remember { mutableStateOf("uninitialized") }
+        debugInt = remember { mutableIntStateOf(0) }
         bytesWritten = remember { mutableLongStateOf(0L) }
         freeSpace = remember { mutableLongStateOf(0L) }
 
@@ -165,7 +145,7 @@ class MainActivity : ComponentActivity() {
             )
             Row {
                 Text(
-                    text = "  ",
+                    text = " ",
                     fontSize = 32.sp,
                     color = colorScheme.primary
                 )
@@ -221,6 +201,8 @@ class MainActivity : ComponentActivity() {
     fun ProgressText() {
         val runIndexValue = runIndex.intValue.toString()
         val percentValue = ((percent.doubleValue * 1000).toInt().toDouble() / 10.0).toString()
+
+        val debug = debugInt.intValue
         var percentText = "Run $runIndexValue: $percentValue% complete"
 
         if(percent.doubleValue < 0.0001) {
@@ -331,16 +313,29 @@ class MainActivity : ComponentActivity() {
                         .fillMaxWidth()
                         .clickable {
                             if(isRunning.value) {
-                                intent.putExtra("data", "isRunning:false")
-                                sendBroadcast(intent)
+                                debugInt.intValue = 1
+                                debugString.value = "here " + MainService.debug
+                                isRunning.value = false
+                                MainService.isRunning = false
                             } else {
                                 val handler = Handler(Looper.getMainLooper())
 
                                 val runnable = object : Runnable {
                                     override fun run() {
-                                        if(isRunning.value) {
-                                            val serviceBytesWritten = bytesWritten.longValue
-                                            val serviceFreeSpace = freeSpace.longValue
+                                        if(MainService.done) {
+                                            isRunning.value = false
+                                            percent.doubleValue = 0.0
+                                            debugInt.intValue = 2
+                                        } else if(isRunning.value) {
+                                            val serviceBytesWritten = MainService.bytesWritten
+                                            val serviceFreeSpace = MainService.freeSpace
+                                            val serviceRunIndex = MainService.serviceRunIndex
+
+                                            debugString.value = MainService.debug
+
+                                            if(serviceRunIndex != runIndex.intValue) {
+                                                runIndex.intValue = serviceRunIndex
+                                            }
 
                                             if(serviceFreeSpace > 0L) {
                                                 var servicePercent = serviceBytesWritten.toDouble() / serviceFreeSpace.toDouble()
@@ -351,17 +346,32 @@ class MainActivity : ComponentActivity() {
                                                     servicePercent = 1.0
                                                 }
 
-                                                percent.doubleValue = servicePercent
-                                            } else {
+                                                if(servicePercent != percent.doubleValue) {
+                                                    percent.doubleValue = servicePercent
+                                                }
+
+                                                debugInt.intValue = 3
+                                            } else if(percent.doubleValue != 0.0) {
                                                 percent.doubleValue = 0.0
+                                                debugInt.intValue = 4
                                             }
 
                                             handler.postDelayed(this, 1000L)
                                         } else {
                                             percent.doubleValue = 0.0
+                                            debugInt.intValue = 5
                                         }
                                     }
                                 }
+
+                                MainService.runCount = repeatOptions[repeatIndex.intValue].toInt()
+                                MainService.isRunning = true
+                                MainService.done = false
+                                debugInt.intValue = 7
+
+                                isRunning.value = true
+
+                                debugString.value = "launching"
 
                                 val serviceIntent = Intent(this, MainService::class.java)
                                 startService(serviceIntent)
