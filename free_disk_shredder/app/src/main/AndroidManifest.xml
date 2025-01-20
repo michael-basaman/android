@@ -18,11 +18,20 @@
             android:theme="@style/Theme.FreeDiskShredder">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.example.free_disk_shredder.service" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
-        <service android:name=".MainService"/>
+        <service android:name=".MainService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.free_disk_shredder.activity" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

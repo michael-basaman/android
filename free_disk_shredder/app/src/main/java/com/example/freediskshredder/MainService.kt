@@ -1,124 +1,227 @@
 package com.example.freediskshredder
 
+import android.annotation.SuppressLint
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.IBinder
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Random
 
 class MainService : Service() {
+    companion object {
+        var serviceRunning: Boolean = false
+        val lock = Any()
+    }
+
+    private val serviceJob = Job()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
+    private var runCount: Int = 0
+    private var isRunning: Boolean = true
+
     override fun onBind(intent: Intent): IBinder? {
         return null
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceJob.cancel()
+    }
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        var runCount = 0
+        var shouldAbort = true
 
-        intent?.let {
-            runCount = intent.getIntExtra("runCount", 0)
+        synchronized(lock) {
+            if(!serviceRunning) {
+                serviceRunning = true
+                shouldAbort = false
+            }
         }
 
-        if(runCount <= 0) {
-            return START_STICKY
+        if(shouldAbort) {
+            return START_NOT_STICKY
         }
 
-        val random = Random()
-        val numBytes = 1024
+        val broadcastReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val data: String? = intent.getStringExtra("data")
 
-        val bytes = ByteArray(numBytes)
+                data?.let {
+                    val tokens = data.split(":")
 
-        val tinyFile = File(this.filesDir, "tiny.bin")
-        val smallFile = File(this.filesDir, "small.bin")
-        val mediumFile = File(this.filesDir, "medium.bin")
-        val largeFile = File(this.filesDir, "large.bin")
-
-        if(!tinyFile.exists()) {
-            random.nextBytes(bytes)
-            tinyFile.writeBytes(bytes)
+                    if(tokens[0] == "isRunning") {
+                        isRunning = tokens[1].toBoolean()
+                    } else if(tokens[0] == "runCount") {
+                        runCount = tokens[1].toInt()
+                    }
+                }
+            }
         }
 
-        for(runIndex in 1..runCount) {
-            var bytesWritten = 0L
+        registerReceiver(broadcastReceiver, IntentFilter("com.example.free_disk_shredder.activity"))
 
-            if(tinyFile.exists()) {
-                intent?.putExtra("freeSpace", tinyFile.freeSpace)
+        serviceScope.launch {
+            runBackgroundTask()
+        }
+
+        synchronized(lock) {
+            serviceRunning = false
+        }
+
+        return START_NOT_STICKY
+    }
+
+    private suspend fun runBackgroundTask() {
+        return withContext(Dispatchers.IO) {
+            val intent = Intent("com.example.free_disk_shredder.service")
+
+            val random = Random()
+            val numBytes = 1024
+
+            val bytes = ByteArray(numBytes)
+
+            intent.putExtra("data", "isRunning:true")
+            sendBroadcast(intent)
+
+            val tinyFile = File(this@MainService.filesDir, "tiny.bin")
+            val smallFile = File(this@MainService.filesDir, "small.bin")
+            val mediumFile = File(this@MainService.filesDir, "medium.bin")
+            val largeFile = File(this@MainService.filesDir, "large.bin")
+
+            if (!tinyFile.exists()) {
+                random.nextBytes(bytes)
+                tinyFile.writeBytes(bytes)
             }
 
-            intent?.putExtra("runIndex", runIndex)
-
-            var error: Boolean = deleteFiles()
-
-            if(error) {
-                intent?.putExtra("error", "initial")
-            }
-
-            if(!error) {
+            while(isRunning && runCount <= 0) {
                 try {
-                    for (i in 1..10) {
-                        for (j in 1..1024) {
-                            random.nextBytes(bytes)
-                            smallFile.writeBytes(bytes)
-                            bytesWritten += 1024L
+                    Thread.sleep(100)
+                } catch(_: Exception) { }
+            }
+
+            for (runIndex in 1..runCount) {
+                var bytesWritten = 0L
+
+                if (tinyFile.exists()) {
+                    val freeSpace: Long = tinyFile.freeSpace
+                    intent.putExtra("data", "freeSpace:$freeSpace")
+                    sendBroadcast(intent)
+                }
+
+                intent.putExtra("data", "runIndex:$runIndex")
+                sendBroadcast(intent)
+
+                var hasError: Boolean = deleteFiles()
+
+                if (hasError) {
+                    intent.putExtra("data", "debug:initial")
+                    sendBroadcast(intent)
+                }
+
+                if (!hasError) {
+                    try {
+                        for (i in 1..10) {
+                            if(!isRunning) {
+                                break
+                            }
+
+                            for (j in 1..1024) {
+                                if(!isRunning) {
+                                    break
+                                }
+
+                                random.nextBytes(bytes)
+                                smallFile.writeBytes(bytes)
+                                bytesWritten += 1024L
+                            }
+
+                            intent.putExtra("data", "bytesWritten:$bytesWritten")
+                            sendBroadcast(intent)
                         }
-
-                        intent?.putExtra("bytesWritten", bytesWritten)
+                    } catch (e: Exception) {
+                        intent.putExtra("data", "bytesWritten:$bytesWritten")
+                        sendBroadcast(intent)
+                        intent.putExtra("data", "debug:small")
+                        sendBroadcast(intent)
+                        hasError = true
                     }
-                } catch (e: Exception) {
-                    intent?.putExtra("bytesWritten", bytesWritten)
-                    intent?.putExtra("error", "small")
-                    error = true
                 }
-            }
 
-            if(!error) {
-                try {
-                    for(i in 1..100) {
-                        for (j in 1..1024) {
-                            random.nextBytes(bytes)
-                            mediumFile.writeBytes(bytes)
-                            bytesWritten += 1024L
+                if (!hasError) {
+                    try {
+                        for (i in 1..100) {
+                            if(!isRunning) {
+                                break
+                            }
+
+                            for (j in 1..1024) {
+                                if(!isRunning) {
+                                    break
+                                }
+
+                                random.nextBytes(bytes)
+                                mediumFile.writeBytes(bytes)
+                                bytesWritten += 1024L
+                            }
+
+                            intent.putExtra("data", "bytesWritten:$bytesWritten")
+                            sendBroadcast(intent)
                         }
-
-                        intent?.putExtra("bytesWritten", bytesWritten)
+                    } catch (e: Exception) {
+                        intent.putExtra("data", "bytesWritten:$bytesWritten")
+                        sendBroadcast(intent)
+                        intent.putExtra("data", "debug:medium")
+                        sendBroadcast(intent)
+                        hasError = true
                     }
-                } catch(e: Exception) {
-                    intent?.putExtra("bytesWritten", bytesWritten)
-                    intent?.putExtra("error", "medium")
-                    error = true
                 }
-            }
 
-            if(!error) {
-                try {
-                    while(true) {
-                        for (j in 1..1024) {
-                            random.nextBytes(bytes)
-                            largeFile.writeBytes(bytes)
-                            bytesWritten += 1024L
+                if (!hasError) {
+                    try {
+                        while (true) {
+                            if(!isRunning) {
+                                break
+                            }
+
+                            for (j in 1..1024) {
+                                if(!isRunning) {
+                                    break
+                                }
+
+                                random.nextBytes(bytes)
+                                largeFile.writeBytes(bytes)
+                                bytesWritten += 1024L
+                            }
+
+                            intent.putExtra("data", "bytesWritten:$bytesWritten")
+                            sendBroadcast(intent)
                         }
-
-                        intent?.putExtra("bytesWritten", bytesWritten)
+                    } catch (e: Exception) {
+                        intent.putExtra("data", "bytesWritten:$bytesWritten")
+                        sendBroadcast(intent)
+                        intent.putExtra("data", "debug:large")
+                        sendBroadcast(intent)
                     }
-                } catch(e: Exception) {
-                    intent?.putExtra("bytesWritten", bytesWritten)
-                    intent?.putExtra("error", "large")
+                }
+
+                if (deleteFiles()) {
+                    intent.putExtra("data", "debug:final")
+                    sendBroadcast(intent)
                 }
             }
 
-            if(deleteFiles()) {
-                val intentError: String? = intent?.getStringExtra("error")
-
-                intentError?.let {
-                    if(intentError != "initial") {
-                        intent.putExtra("error", "final")
-                    }
-                }
-            }
+            isRunning = false
+            intent.putExtra("data", "isRunning:false")
+            sendBroadcast(intent)
         }
-
-        intent?.putExtra("isRunning", false)
-
-        return START_STICKY
     }
 
     private fun deleteFiles(): Boolean {
@@ -126,14 +229,14 @@ class MainService : Service() {
         val mediumFile = File(this.filesDir, "medium.bin")
         val largeFile = File(this.filesDir, "large.bin")
 
-        var error = false
+        var hasError = false
 
         try {
             if (smallFile.exists()) {
                 smallFile.delete()
             }
         } catch(e: Exception) {
-            error = true
+            hasError = true
         }
 
         try {
@@ -141,7 +244,7 @@ class MainService : Service() {
                 mediumFile.delete()
             }
         } catch(e: Exception) {
-            error = true
+            hasError = true
         }
 
         try {
@@ -149,9 +252,9 @@ class MainService : Service() {
                 largeFile.delete()
             }
         } catch(e: Exception) {
-            error = true
+            hasError = true
         }
 
-        return error
+        return hasError
     }
 }

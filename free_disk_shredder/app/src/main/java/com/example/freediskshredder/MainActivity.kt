@@ -1,6 +1,10 @@
 package com.example.freediskshredder
 
+import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
@@ -23,9 +27,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableDoubleState
 import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -40,30 +46,71 @@ import java.io.File
 
 
 class MainActivity : ComponentActivity() {
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             FreeDiskShredder()
         }
+
+        val broadcastReceiver = object : BroadcastReceiver() {
+            @SuppressLint("UnsafeIntentLaunch")
+            override fun onReceive(context: Context, intent: Intent) {
+                val data: String? = intent.getStringExtra("data")
+
+                data?.let {
+                    val tokens = data.split(":")
+
+                    if(tokens[0] == "bytesWritten") {
+                        bytesWritten.longValue = tokens[1].toLong()
+                    } else if(tokens[0] == "isRunning") {
+                        isRunning.value = tokens[1].toBoolean()
+
+                        val repeatOption: Int = repeatOptions[repeatIndex.intValue].toInt()
+
+                        intent.putExtra("data", "runCount:$repeatOption")
+                        sendBroadcast(intent)
+                    } else if(tokens[0] == "runIndex") {
+                        runIndex.intValue = tokens[1].toInt()
+                    } else if(tokens[0] == "freeSpace") {
+                        freeSpace.longValue = tokens[1].toLong()
+                    } else if(tokens[0] == "debug") {
+                        debugString.value = tokens[1]
+                    }
+                }
+            }
+        }
+
+        registerReceiver(broadcastReceiver, IntentFilter("com.example.free_disk_shredder.service"))
     }
 
     private val driveOptions = ArrayList<String>()
     private val repeatOptions = ArrayList<String>()
 
     private lateinit var runCount: MutableIntState
+    private lateinit var runIndex: MutableIntState
     private lateinit var percent: MutableDoubleState
     private lateinit var isRunning: MutableState<Boolean>
     private lateinit var driveIndex: MutableIntState
     private lateinit var repeatIndex: MutableIntState
+    private lateinit var debugString: MutableState<String>
+    private lateinit var bytesWritten: MutableLongState
+    private lateinit var freeSpace: MutableLongState
+
+    private val intent = Intent("com.example.free_disk_shredder.activity")
 
     @Composable
     fun FreeDiskShredder() {
         runCount = remember { mutableIntStateOf(0) }
+        runIndex = remember { mutableIntStateOf(0) }
         percent = remember { mutableDoubleStateOf(0.0) }
         isRunning = remember { mutableStateOf(false) }
         driveIndex = remember { mutableIntStateOf(0) }
         repeatIndex = remember { mutableIntStateOf(0) }
+        debugString = remember { mutableStateOf("no status") }
+        bytesWritten = remember { mutableLongStateOf(0L) }
+        freeSpace = remember { mutableLongStateOf(0L) }
 
         FreeDiskShredderTheme {
             val driveNames: List<String> = getDriveNames()
@@ -86,7 +133,7 @@ class MainActivity : ComponentActivity() {
 
                 OptionItem("Drive", driveOptions, driveIndex)
                 OptionItem("Repeat", repeatOptions, repeatIndex)
-                ListSurfaceItem(driveOptions)
+                ListSurfaceItem()
                 Box {
                     ProgressBar()
                     ProgressText()
@@ -172,9 +219,9 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun ProgressText() {
-        val runValue = runCount.intValue.toString()
+        val runIndexValue = runIndex.intValue.toString()
         val percentValue = ((percent.doubleValue * 1000).toInt().toDouble() / 10.0).toString()
-        var percentText = "Run $runValue: $percentValue% complete"
+        var percentText = "Run $runIndexValue: $percentValue% complete"
 
         if(percent.doubleValue < 0.0001) {
             percentText = " "
@@ -260,8 +307,9 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun ListSurfaceItem(driveOptions: List<String>) {
+    fun ListSurfaceItem() {
         var text = "Shred empty space"
+
         if(isRunning.value) {
             text = "In progress: Cancel"
         }
@@ -283,24 +331,16 @@ class MainActivity : ComponentActivity() {
                         .fillMaxWidth()
                         .clickable {
                             if(isRunning.value) {
-                                isRunning.value = false
-                                percent.doubleValue = 0.0
+                                intent.putExtra("data", "isRunning:false")
+                                sendBroadcast(intent)
                             } else {
-                                val intent = Intent(this, MainService::class.java)
-
                                 val handler = Handler(Looper.getMainLooper())
 
                                 val runnable = object : Runnable {
                                     override fun run() {
-                                        val serviceIsRunning: Boolean = intent.getBooleanExtra("isRunning", false)
-                                        isRunning.value = serviceIsRunning
-
-                                        if(serviceIsRunning) {
-                                            val serviceRunIndex = intent.getIntExtra("runIndex", 0)
-                                            runCount.intValue = serviceRunIndex
-
-                                            val serviceBytesWritten = intent.getLongExtra("bytesWritten", 0L)
-                                            val serviceFreeSpace = intent.getLongExtra("freeSpace", 1L)
+                                        if(isRunning.value) {
+                                            val serviceBytesWritten = bytesWritten.longValue
+                                            val serviceFreeSpace = freeSpace.longValue
 
                                             if(serviceFreeSpace > 0L) {
                                                 var servicePercent = serviceBytesWritten.toDouble() / serviceFreeSpace.toDouble()
@@ -318,23 +358,15 @@ class MainActivity : ComponentActivity() {
 
                                             handler.postDelayed(this, 1000L)
                                         } else {
-                                            runCount.intValue = 0
                                             percent.doubleValue = 0.0
                                         }
                                     }
                                 }
 
-                                intent.putExtra("isRunning", true)
-                                intent.putExtra("drive", driveOptions[driveIndex.intValue])
-                                intent.putExtra("runCount", repeatOptions[repeatIndex.intValue].toInt())
-                                intent.putExtra("runIndex", 0)
+                                val serviceIntent = Intent(this, MainService::class.java)
+                                startService(serviceIntent)
 
-                                runCount.intValue = 1
-                                isRunning.value = true
-
-                                startService(intent)
-
-                                handler.postDelayed(runnable, 0L)
+                                handler.postDelayed(runnable, 1000L)
                             }
                         }) {
                     ScaledText(text)
