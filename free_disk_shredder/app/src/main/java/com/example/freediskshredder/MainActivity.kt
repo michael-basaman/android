@@ -1,11 +1,9 @@
 package com.example.freediskshredder
 
-import android.app.Service
 import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,8 +37,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.freediskshredder.ui.theme.FreeDiskShredderTheme
 import java.io.File
-import java.util.Random
-
 
 
 class MainActivity : ComponentActivity() {
@@ -290,7 +286,7 @@ class MainActivity : ComponentActivity() {
                                 isRunning.value = false
                                 percent.doubleValue = 0.0
                             } else {
-                                val intent = Intent(this, MyService::class.java)
+                                val intent = Intent(this, MainService::class.java)
 
                                 val handler = Handler(Looper.getMainLooper())
 
