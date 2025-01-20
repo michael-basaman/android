@@ -41,11 +41,47 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import com.example.freediskshredder.MainService.Companion.notificationId
 import com.example.freediskshredder.ui.theme.FreeDiskShredderTheme
 import java.io.File
 
 
 class MainActivity : ComponentActivity() {
+    private fun cleanup() {
+        isRunning.value = false
+        MainService.isRunning = false
+
+        try {
+            if (notificationId > 0
+                && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                val notificationManager = NotificationManagerCompat.from(this)
+                notificationManager.cancel(notificationId)
+            }
+        } catch(_: Exception) { }
+
+        try {
+            val serviceIntent = Intent(this, MainService::class.java)
+            stopService(serviceIntent)
+        } catch(_: Exception) { }
+
+        deleteFiles()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+
+        // cleanup()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+
+        // cleanup()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -63,10 +99,15 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+
+        deleteFiles()
+
+        isReady = true
     }
 
     private val driveOptions = ArrayList<String>()
     private val repeatOptions = ArrayList<String>()
+    private var isReady = false
 
     private lateinit var runCount: MutableIntState
     private lateinit var runIndex: MutableIntState
@@ -78,6 +119,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var debugInt: MutableIntState
     private lateinit var bytesWritten: MutableLongState
     private lateinit var freeSpace: MutableLongState
+    private lateinit var waiting: MutableState<Boolean>
 
     @Composable
     fun FreeDiskShredder() {
@@ -91,6 +133,7 @@ class MainActivity : ComponentActivity() {
         debugInt = remember { mutableIntStateOf(0) }
         bytesWritten = remember { mutableLongStateOf(0L) }
         freeSpace = remember { mutableLongStateOf(0L) }
+        waiting = remember { mutableStateOf(false) }
 
         FreeDiskShredderTheme {
             val driveNames: List<String> = getDriveNames()
@@ -202,7 +245,6 @@ class MainActivity : ComponentActivity() {
         val runIndexValue = runIndex.intValue.toString()
         val percentValue = ((percent.doubleValue * 1000).toInt().toDouble() / 10.0).toString()
 
-        val debug = debugInt.intValue
         var percentText = "Run $runIndexValue: $percentValue% complete"
 
         if(percent.doubleValue < 0.0001) {
@@ -292,8 +334,10 @@ class MainActivity : ComponentActivity() {
     fun ListSurfaceItem() {
         var text = "Shred empty space"
 
-        if(isRunning.value) {
-            text = "In progress: Cancel"
+        if(waiting.value) {
+            text = "Still cleaning old files.."
+        } else if(isRunning.value) {
+            text = "In progress.. Cancel"
         }
 
         Surface(
@@ -312,9 +356,17 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            if(isRunning.value) {
-                                debugInt.intValue = 1
-                                debugString.value = "here " + MainService.debug
+                            if(waiting.value) {
+                                // do nothing
+                            } else if(!isReady) {
+                                val handler = Handler(Looper.getMainLooper())
+                                
+                                val runnable = Runnable { waiting.value = false }
+
+                                waiting.value = true
+
+                                handler.postDelayed(runnable, 3000L)
+                            } else if(isRunning.value) {
                                 isRunning.value = false
                                 MainService.isRunning = false
                             } else {
@@ -325,20 +377,17 @@ class MainActivity : ComponentActivity() {
                                         if(MainService.done) {
                                             isRunning.value = false
                                             percent.doubleValue = 0.0
-                                            debugInt.intValue = 2
                                         } else if(isRunning.value) {
-                                            val serviceBytesWritten = MainService.bytesWritten
-                                            val serviceFreeSpace = MainService.freeSpace
-                                            val serviceRunIndex = MainService.serviceRunIndex
-
-                                            debugString.value = MainService.debug
-
-                                            if(serviceRunIndex != runIndex.intValue) {
-                                                runIndex.intValue = serviceRunIndex
+                                            if(MainService.serviceRunIndex != runIndex.intValue) {
+                                                runIndex.intValue = MainService.serviceRunIndex
                                             }
 
-                                            if(serviceFreeSpace > 0L) {
-                                                var servicePercent = serviceBytesWritten.toDouble() / serviceFreeSpace.toDouble()
+                                            if(MainService.debugInt != debugInt.intValue) {
+                                                debugInt.intValue = MainService.debugInt
+                                            }
+
+                                            if(MainService.freeSpace > 0L) {
+                                                var servicePercent = MainService.bytesWritten.toDouble() / MainService.freeSpace.toDouble()
 
                                                 if(servicePercent < 0.0) {
                                                     servicePercent = 0.0
@@ -349,17 +398,13 @@ class MainActivity : ComponentActivity() {
                                                 if(servicePercent != percent.doubleValue) {
                                                     percent.doubleValue = servicePercent
                                                 }
-
-                                                debugInt.intValue = 3
                                             } else if(percent.doubleValue != 0.0) {
                                                 percent.doubleValue = 0.0
-                                                debugInt.intValue = 4
                                             }
 
                                             handler.postDelayed(this, 1000L)
                                         } else {
                                             percent.doubleValue = 0.0
-                                            debugInt.intValue = 5
                                         }
                                     }
                                 }
@@ -367,11 +412,8 @@ class MainActivity : ComponentActivity() {
                                 MainService.runCount = repeatOptions[repeatIndex.intValue].toInt()
                                 MainService.isRunning = true
                                 MainService.done = false
-                                debugInt.intValue = 7
 
                                 isRunning.value = true
-
-                                debugString.value = "launching"
 
                                 val serviceIntent = Intent(this, MainService::class.java)
                                 startService(serviceIntent)
@@ -383,6 +425,44 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun deleteFiles(): Boolean {
+        var hasError = false
+
+        try {
+            val smallFile = File(this.filesDir, "small.bin")
+            val mediumFile = File(this.filesDir, "medium.bin")
+            val largeFile = File(this.filesDir, "large.bin")
+
+            try {
+                if (smallFile.exists()) {
+                    smallFile.delete()
+                }
+            } catch(e: Exception) {
+                hasError = true
+            }
+
+            try {
+                if (mediumFile.exists()) {
+                    mediumFile.delete()
+                }
+            } catch(e: Exception) {
+                hasError = true
+            }
+
+            try {
+                if (largeFile.exists()) {
+                    largeFile.delete()
+                }
+            } catch(e: Exception) {
+                hasError = true
+            }
+        } catch(e2: Exception) {
+            hasError = true
+        }
+
+        return hasError
     }
 
     private fun getDriveNames(): List<String> {

@@ -1,7 +1,7 @@
 package com.example.freediskshredder
 
 import android.Manifest
-import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Random
 
+
 class MainService : Service() {
     companion object {
         var serviceRunning: Boolean = false
@@ -29,8 +30,10 @@ class MainService : Service() {
         var serviceRunIndex = 0
         var bytesWritten: Long = 0L
         var freeSpace: Long = 0L
+        var debugInt: Int = 0
         var debug: String = "no status"
         var done: Boolean = false
+        var notificationId = 0
 
         val lock = Any()
     }
@@ -38,30 +41,64 @@ class MainService : Service() {
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
 
-    private var notificationId = 0
+    private val channelId = "free_disk_shredder"
 
     override fun onBind(intent: Intent): IBinder? {
         return null
     }
 
+    private fun clearNotification() {
+        if (notificationId > 0) {
+            try {
+                val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.cancel(notificationId)
+
+            } catch(_: Exception) { }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+
         serviceJob.cancel()
+        clearNotification()
     }
 
     private fun createNotificationChannel(context: Context) {
         val name = "Free Disk Shredder"
-        val descriptionText = "Status"
-        val importance = NotificationManager.IMPORTANCE_DEFAULT
+        val importance = NotificationManager.IMPORTANCE_LOW
 
-        val channel = NotificationChannel("channel_id", name, importance).apply {
-            description = descriptionText
+        val channel = NotificationChannel(channelId, name, importance)
+
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+
+        notificationManager?.createNotificationChannel(channel)
+    }
+
+    private fun createNotification(context: Context): Notification {
+        val percentValue: String = getPercentValue()
+
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.mipmap.ic_launcher) // Replace with your notification icon
+            .setContentTitle("Free Disk Shredder")
+            .setContentText("Run $serviceRunIndex: $percentValue% complete")
+            .setOngoing(true)
+
+        return builder.build()
+    }
+
+    private fun createPersistentNotification(context: Context) {
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        notificationManager?.notify(notificationId, createNotification(this))
+    }
+
+    private fun updateNotification(context: Context) {
+        if (notificationId > 0
+                && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) {
+            val notificationManager = NotificationManagerCompat.from(context)
+            notificationManager.notify(notificationId, createNotification(context))
         }
-
-        val notificationManager: NotificationManager =
-            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        notificationManager.createNotificationChannel(channel)
     }
 
     private fun getPercentValue(): String {
@@ -80,42 +117,27 @@ class MainService : Service() {
         return ((percent * 1000).toInt().toDouble() / 10.0).toString()
     }
 
-    private fun createNotification(context: Context): NotificationCompat.Builder {
-        val percentValue = getPercentValue()
+    private fun getNotificationId(context: Context): Int {
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        val notifications: Array<StatusBarNotification> = notificationManager.getActiveNotifications()
 
-        return NotificationCompat.Builder(context, "free_disk_shredder")
-            .setContentTitle("Free Disk Shredder")
-            .setContentText("Run $serviceRunIndex/$runCount: $percentValue%")
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-    }
+        val existingNotifications: HashSet<Int> = HashSet()
+        for(notification in notifications) {
+            existingNotifications.add(notification.id)
+        }
 
-    @SuppressLint("MissingPermission")
-    private suspend fun updateNotification() {
-        return withContext(Dispatchers.IO) {
-            while (isRunning) {
-                if (notificationId > 0) {
-                    val notificationManager = NotificationManagerCompat.from(this@MainService)
+        var id = 0
+        while(true) {
+            id += 1
 
-                    try {
-                        notificationManager.notify(
-                            notificationId,
-                            createNotification(this@MainService).build()
-                        )
-                    } catch (e: Exception) {
-                        break
-                    }
-                }
-
-                try {
-                    Thread.sleep(5000L)
-                } catch (_: Exception) { }
+            if(!existingNotifications.contains(id)) {
+                return id
             }
         }
     }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         var shouldAbort = true
-
-        debug = "started"
 
         synchronized(lock) {
             if(!serviceRunning) {
@@ -128,56 +150,45 @@ class MainService : Service() {
             return START_NOT_STICKY
         }
 
+        try {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                createNotificationChannel(this)
 
+                notificationId = getNotificationId(this)
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED) {
-            createNotificationChannel(this)
-
-            val notificationManager =
-                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-            val notifications: Array<StatusBarNotification> =
-                notificationManager.getActiveNotifications()
-
-            val r = Random()
-            val s = HashSet<Int>()
-            for (n in notifications) {
-                s.add(n.id)
+                createPersistentNotification(this)
             }
-            var c = 0
-            var i = 0
-            while (c < 10000) {
-                i = r.nextInt(9_000_000) + 1_000_000
-                if (!s.contains(i)) {
-                    break
-                }
-                c++
-            }
-
-            if (!s.contains(i)) {
-                notificationId = i
-                notificationManager.notify(notificationId, createNotification(this).build())
-            }
-        }
-
-         // 1 is the notification ID
-
-        debug = "not aborted"
+        } catch(_: Exception) { }
 
         serviceScope.launch {
             done = false
             runBackgroundTask()
             done = true
             serviceRunning = false
-            debug = "stopped"
         }
 
         serviceScope.launch {
-            updateNotification()
+            updateNotifications()
+            clearNotification()
         }
 
         return START_NOT_STICKY
+    }
+
+    private suspend fun updateNotifications() {
+        return withContext(Dispatchers.IO) {
+            try {
+                while(isRunning) {
+                    try {
+                        Thread.sleep(1000L)
+                    } catch(_: Exception) { }
+
+                    updateNotification(this@MainService)
+                }
+            } catch(_: Exception) { }
+        }
     }
 
     private suspend fun runBackgroundTask() {
@@ -292,33 +303,37 @@ class MainService : Service() {
     }
 
     private fun deleteFiles(): Boolean {
-        val smallFile = File(this.filesDir, "small.bin")
-        val mediumFile = File(this.filesDir, "medium.bin")
-        val largeFile = File(this.filesDir, "large.bin")
-
         var hasError = false
 
         try {
-            if (smallFile.exists()) {
-                smallFile.delete()
-            }
-        } catch(e: Exception) {
-            hasError = true
-        }
+            val smallFile = File(this.filesDir, "small.bin")
+            val mediumFile = File(this.filesDir, "medium.bin")
+            val largeFile = File(this.filesDir, "large.bin")
 
-        try {
-            if (mediumFile.exists()) {
-                mediumFile.delete()
+            try {
+                if (smallFile.exists()) {
+                    smallFile.delete()
+                }
+            } catch (e: Exception) {
+                hasError = true
             }
-        } catch(e: Exception) {
-            hasError = true
-        }
 
-        try {
-            if (largeFile.exists()) {
-                largeFile.delete()
+            try {
+                if (mediumFile.exists()) {
+                    mediumFile.delete()
+                }
+            } catch (e: Exception) {
+                hasError = true
             }
-        } catch(e: Exception) {
+
+            try {
+                if (largeFile.exists()) {
+                    largeFile.delete()
+                }
+            } catch (e: Exception) {
+                hasError = true
+            }
+        } catch(e2: Exception) {
             hasError = true
         }
 
