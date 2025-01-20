@@ -1,6 +1,12 @@
 package com.example.freediskshredder
 
+import android.app.Service
+import android.content.Intent
 import android.os.Bundle
+import android.os.Environment
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -17,13 +23,13 @@ import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableDoubleState
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -32,6 +38,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.freediskshredder.ui.theme.FreeDiskShredderTheme
+import java.io.File
+import java.util.Random
+
 
 
 class MainActivity : ComponentActivity() {
@@ -39,58 +48,52 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            FreeDiskShredder(false)
+            FreeDiskShredder()
         }
-
     }
 
-    @Composable
-    fun FreeDiskShredder(isPreview: Boolean) {
-        var percent: Double by remember { mutableDoubleStateOf(0.0) }
+    private val driveOptions = ArrayList<String>()
+    private val repeatOptions = ArrayList<String>()
 
-        if(isPreview) {
-            percent += 0.15
-        }
-//        if(!isPreview) {
-//            val handler = Handler(Looper.getMainLooper())
-//
-//            val runnable = object : Runnable {
-//                override fun run() {
-//                    percent += 0.01
-//                    if(percent > 1.0) {
-//                        percent = 0.0
-//                    }
-//
-//                    //handler.postDelayed(this, 1000L)
-//                }
-//            }
-//
-//            //handler.postDelayed(runnable, 0)
-//        }
+    private lateinit var runCount: MutableIntState
+    private lateinit var percent: MutableDoubleState
+    private lateinit var isRunning: MutableState<Boolean>
+    private lateinit var driveIndex: MutableIntState
+    private lateinit var repeatIndex: MutableIntState
+
+    @Composable
+    fun FreeDiskShredder() {
+        runCount = remember { mutableIntStateOf(0) }
+        percent = remember { mutableDoubleStateOf(0.0) }
+        isRunning = remember { mutableStateOf(false) }
+        driveIndex = remember { mutableIntStateOf(0) }
+        repeatIndex = remember { mutableIntStateOf(0) }
 
         FreeDiskShredderTheme {
-            val driveOptions = ArrayList<String>()
-            driveOptions.add("Internal Storage")
-            driveOptions.add("SD Card")
+            val driveNames: List<String> = getDriveNames()
 
-            val repeatOptions = ArrayList<String>()
+            driveOptions.clear()
+
+            for (driveName in driveNames) {
+                driveOptions.add(driveName)
+            }
+
+            repeatOptions.clear()
             repeatOptions.add("1")
             repeatOptions.add("2")
             repeatOptions.add("4")
             repeatOptions.add("8")
 
-            val isRunning: MutableState<Boolean> = remember { mutableStateOf(false) }
-
             Column(modifier = Modifier
                 .safeDrawingPadding()
                 .fillMaxSize()) {
 
-                OptionItem("Drive", driveOptions, isRunning)
-                OptionItem("Repeat", repeatOptions, isRunning)
-                ListSurfaceItem(isRunning)
+                OptionItem("Drive", driveOptions, driveIndex)
+                OptionItem("Repeat", repeatOptions, repeatIndex)
+                ListSurfaceItem(driveOptions)
                 Box {
-                    ProgressBar(percent)
-                    ProgressText(percent)
+                    ProgressBar()
+                    ProgressText()
                 }
                 Surface(
                     color = colorScheme.background,
@@ -106,22 +109,8 @@ class MainActivity : ComponentActivity() {
     @Preview(showBackground = true)
     @Composable
     fun FreeDiskShredderPreview() {
-        FreeDiskShredder(true)
+        FreeDiskShredder()
     }
-
-//    @Composable
-//    fun Spacer() {
-//        Surface(
-//            color = MaterialTheme.colorScheme.tertiary,
-//            modifier = Modifier
-//                .fillMaxWidth()) {
-//            Text(
-//                text = "",
-//                modifier = Modifier
-//                    .size(8.dp)
-//            )
-//        }
-//    }
 
     @Composable
     fun ScaledText(text: String) {
@@ -153,12 +142,12 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun ProgressBar(percent: Double) {
-        val surfaceWidth = remember { mutableIntStateOf(0) }
+    fun ProgressBar() {
+        val surfaceWidth: MutableIntState = remember { mutableIntStateOf(0) }
 
-        val percentPixels = surfaceWidth.intValue.toDouble() * percent
+        val percentPixels = surfaceWidth.intValue.toDouble() * percent.doubleValue
 
-        val dpValue = percentPixels / LocalDensity.current.density
+        val dpValue = percentPixels / LocalDensity.current.density.toDouble()
 
         Surface(
             color = colorScheme.background,
@@ -186,10 +175,12 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun ProgressText(percent: Double) {
-        var percentText = ((percent * 1000).toInt().toDouble() / 10.0).toString() + "% complete"
+    fun ProgressText() {
+        val runValue = runCount.intValue.toString()
+        val percentValue = ((percent.doubleValue * 1000).toInt().toDouble() / 10.0).toString()
+        var percentText = "Run $runValue: $percentValue% complete"
 
-        if(percent < 0.001) {
+        if(percent.doubleValue < 0.0001) {
             percentText = " "
         }
 
@@ -202,22 +193,20 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun OptionItem(label: String, options: List<String>, isRunning: MutableState<Boolean>) {
-        var index: Int by remember { mutableIntStateOf(0) }
-
+    fun OptionItem(label: String, options: List<String>, index: MutableIntState) {
         Surface(
             color = colorScheme.background,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
                     if(!isRunning.value) {
-                        var nextIndex = index + 1
+                        var nextIndex = index.intValue + 1
 
                         if(nextIndex >= options.size) {
                             nextIndex = 0
                         }
 
-                        index = nextIndex
+                        index.intValue = nextIndex
                     }
                 },
             border = BorderStroke(
@@ -254,7 +243,7 @@ class MainActivity : ComponentActivity() {
                             color = colorScheme.primary
                         )
                         Text(
-                            text = options[index],
+                            text = options[index.intValue],
                             fontSize = 32.sp,
                             color = colorScheme.primary
                         )
@@ -275,10 +264,10 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun ListSurfaceItem(isRunning: MutableState<Boolean>) {
-        var text = "Start"
+    fun ListSurfaceItem(driveOptions: List<String>) {
+        var text = "Shred empty space"
         if(isRunning.value) {
-            text = "Stop"
+            text = "In progress: Cancel"
         }
 
         Surface(
@@ -297,12 +286,91 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            isRunning.value = !isRunning.value
+                            if(isRunning.value) {
+                                isRunning.value = false
+                                percent.doubleValue = 0.0
+                            } else {
+                                val intent = Intent(this, MyService::class.java)
+
+                                val handler = Handler(Looper.getMainLooper())
+
+                                val runnable = object : Runnable {
+                                    override fun run() {
+                                        val serviceIsRunning: Boolean = intent.getBooleanExtra("isRunning", false)
+                                        isRunning.value = serviceIsRunning
+
+                                        if(serviceIsRunning) {
+                                            val serviceRunIndex = intent.getIntExtra("runIndex", 0)
+                                            runCount.intValue = serviceRunIndex
+
+                                            val serviceBytesWritten = intent.getLongExtra("bytesWritten", 0L)
+                                            val serviceFreeSpace = intent.getLongExtra("freeSpace", 1L)
+
+                                            if(serviceFreeSpace > 0L) {
+                                                var servicePercent = serviceBytesWritten.toDouble() / serviceFreeSpace.toDouble()
+
+                                                if(servicePercent < 0.0) {
+                                                    servicePercent = 0.0
+                                                } else if(servicePercent > 1.0) {
+                                                    servicePercent = 1.0
+                                                }
+
+                                                percent.doubleValue = servicePercent
+                                            } else {
+                                                percent.doubleValue = 0.0
+                                            }
+
+                                            handler.postDelayed(this, 1000L)
+                                        } else {
+                                            runCount.intValue = 0
+                                            percent.doubleValue = 0.0
+                                        }
+                                    }
+                                }
+
+                                intent.putExtra("isRunning", true)
+                                intent.putExtra("drive", driveOptions[driveIndex.intValue])
+                                intent.putExtra("runCount", repeatOptions[repeatIndex.intValue].toInt())
+                                intent.putExtra("runIndex", 0)
+
+                                runCount.intValue = 1
+                                isRunning.value = true
+
+                                startService(intent)
+
+                                handler.postDelayed(runnable, 0L)
+                            }
                         }) {
                     ScaledText(text)
                 }
             }
         }
+    }
+
+    private fun getDriveNames(): List<String> {
+        val driveNames = mutableListOf<String>()
+
+        driveNames.add("Internal Storage")
+
+        try {
+            val externalStorageDirectory = Environment.getExternalStorageDirectory()
+
+            val rootDirectory = externalStorageDirectory.parentFile
+
+            if (rootDirectory != null && rootDirectory.isDirectory) {
+                val files: Array<File>? = rootDirectory.listFiles()
+
+                files?.let {
+                    for(file in files) {
+                        if (file.isDirectory && file.canRead()) {
+                            driveNames.add(file.name)
+                        }
+                    }
+                }
+            }
+        } catch(_: Exception) { }
+
+        return driveNames
     }
 }
 
