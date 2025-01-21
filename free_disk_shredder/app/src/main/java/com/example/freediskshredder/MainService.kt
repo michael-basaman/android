@@ -74,18 +74,25 @@ class MainService : Service() {
         serviceJob.cancel()
         mainNotification.clearNotification(this)
 
-        serviceRunning = false
-        done = true
+        synchronized(lock) {
+            serviceRunning = false
+            done = true
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if(serviceRunning) {
-            return START_NOT_STICKY
-        } else {
+        val alreadyRunning: Boolean
+
+        synchronized(lock) {
+            alreadyRunning = serviceRunning
             serviceRunning = true
+            done = false
         }
 
-        done = false
+        if(alreadyRunning) {
+            return START_NOT_STICKY
+        }
+
         isRunning = true
 
         serviceScope.launch {
