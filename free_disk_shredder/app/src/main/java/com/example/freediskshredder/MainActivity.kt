@@ -41,78 +41,216 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationManagerCompat
-import com.example.freediskshredder.MainService.Companion.notificationId
 import com.example.freediskshredder.ui.theme.FreeDiskShredderTheme
 import java.io.File
 
 
 class MainActivity : ComponentActivity() {
-    private fun cleanup() {
-        isRunning.value = false
-        MainService.isRunning = false
-
-        try {
-            if (notificationId > 0
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED
-            ) {
-                val notificationManager = NotificationManagerCompat.from(this)
-                notificationManager.cancel(notificationId)
-            }
-        } catch(_: Exception) { }
-
-        try {
-            val serviceIntent = Intent(this, MainService::class.java)
-            stopService(serviceIntent)
-        } catch(_: Exception) { }
-
-        deleteFiles()
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-
-        // cleanup()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-
-        // cleanup()
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        super.onCreate(null)
         enableEdgeToEdge()
         setContent {
             FreeDiskShredder()
         }
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    1
-                )
+        try {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        1
+                    )
+                }
+            }
+        } catch(e: Exception) {
+            exception.add("POST_NOTIFICATIONS")
+            for(item in e.stackTrace) {
+                exception.add(item.toString())
             }
         }
 
-        deleteFiles()
+        try {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.FOREGROUND_SERVICE),
+                    2
+                )
+            }
+        } catch(e: Exception) {
+            exception.add("FOREGROUND_SERVICE")
+            for(item in e.stackTrace) {
+                exception.add(item.toString())
+            }
+        }
+
+        try {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+                    != PackageManager.PERMISSION_GRANTED) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC),
+                        3
+                    )
+                }
+            }
+        } catch(e: Exception) {
+            exception.add("FOREGROUND_SERVICE_DATA_SYNC")
+            for(item in e.stackTrace) {
+                exception.add(item.toString())
+            }
+        }
+
+        try {
+            deleteFiles()
+        } catch(e: Exception) {
+            exception.add("deleteFiles")
+            for(item in e.stackTrace) {
+                exception.add(item.toString())
+            }
+        }
 
         isReady = true
+
+        startExceptionHandler()
+        startProgressHandler()
+    }
+
+    private fun startProgressHandler() {
+        val handler = Handler(Looper.getMainLooper())
+
+        val runnable = object : Runnable {
+            override fun run() {
+                if(MainService.isRunning != serviceRunning.value) {
+                    serviceRunning.value = MainService.isRunning
+                }
+
+                if(MainService.done) {
+                    isRunning.value = false
+                    percent.doubleValue = 0.0
+                } else if(MainService.isRunning) {
+                    if(!isRunning.value) {
+                        isRunning.value = true
+                    }
+
+                    if(MainService.serviceRunIndex != runIndex.intValue) {
+                        runIndex.intValue = MainService.serviceRunIndex
+                    }
+
+                    if(MainService.debugInt != debugInt.intValue) {
+                        debugInt.intValue = MainService.debugInt
+                    }
+
+                    if(MainService.freeSpace > 0L) {
+                        var servicePercent = MainService.bytesWritten.toDouble() / MainService.freeSpace.toDouble()
+
+                        if(servicePercent < 0.0) {
+                            servicePercent = 0.0
+                        } else if(servicePercent > 1.0) {
+                            servicePercent = 1.0
+                        }
+
+                        if(servicePercent != percent.doubleValue) {
+                            percent.doubleValue = servicePercent
+                        }
+                    } else if(percent.doubleValue != 0.0) {
+                        percent.doubleValue = 0.0
+                    }
+                } else {
+                    percent.doubleValue = 0.0
+                }
+
+                handler.postDelayed(this, 1000L)
+            }
+        }
+
+        handler.postDelayed(runnable, 0L)
+    }
+
+    private fun startExceptionHandler() {
+        val handler = Handler(Looper.getMainLooper())
+
+        val runnable = object : Runnable {
+            override fun run() {
+                val arr = ArrayList<String>()
+
+                if (exception.size > 0) {
+                    for(item in exception) {
+                        arr.add(item)
+                    }
+                } else if (MainService.exception.size > 0) {
+                    for(item in MainService.exception) {
+                        arr.add(item)
+                    }
+                }
+
+                if(arr.size > 0) {
+                    setContent {
+                        Column(
+                            modifier = Modifier
+                                .safeDrawingPadding()
+                                .fillMaxSize()) {
+                            arr.forEach { item ->
+                                Text(text = item)
+                            }
+                        }
+                    }
+                } else {
+                    handler.postDelayed(this, 1000L)
+                }
+            }
+        }
+
+        handler.postDelayed(runnable, 1000L)
+    }
+
+    private fun startMainService() {
+        try {
+            MainService.runCount = repeatOptions[repeatIndex.intValue].toInt()
+            MainService.isRunning = true
+            MainService.done = false
+
+            isRunning.value = true
+
+            val serviceIntent = Intent(this, MainService::class.java)
+
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED
+                && ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE)
+                == PackageManager.PERMISSION_GRANTED
+                && ActivityCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC
+                )
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch(e: Exception) {
+            exception.add("startMainService")
+            for(item in e.stackTrace) {
+                exception.add(item.toString())
+            }
+        }
     }
 
     private val driveOptions = ArrayList<String>()
     private val repeatOptions = ArrayList<String>()
     private var isReady = false
+    private val exception = ArrayList<String>()
 
     private lateinit var runCount: MutableIntState
     private lateinit var runIndex: MutableIntState
     private lateinit var percent: MutableDoubleState
     private lateinit var isRunning: MutableState<Boolean>
+    private lateinit var serviceRunning: MutableState<Boolean>
     private lateinit var driveIndex: MutableIntState
     private lateinit var repeatIndex: MutableIntState
     private lateinit var debugString: MutableState<String>
@@ -121,12 +259,15 @@ class MainActivity : ComponentActivity() {
     private lateinit var freeSpace: MutableLongState
     private lateinit var waiting: MutableState<Boolean>
 
+    private lateinit var exceptionInt: MutableState<Boolean>
+
     @Composable
     fun FreeDiskShredder() {
         runCount = remember { mutableIntStateOf(0) }
         runIndex = remember { mutableIntStateOf(0) }
         percent = remember { mutableDoubleStateOf(0.0) }
         isRunning = remember { mutableStateOf(false) }
+        serviceRunning = remember { mutableStateOf(false) }
         driveIndex = remember { mutableIntStateOf(0) }
         repeatIndex = remember { mutableIntStateOf(0) }
         debugString = remember { mutableStateOf("uninitialized") }
@@ -134,12 +275,12 @@ class MainActivity : ComponentActivity() {
         bytesWritten = remember { mutableLongStateOf(0L) }
         freeSpace = remember { mutableLongStateOf(0L) }
         waiting = remember { mutableStateOf(false) }
+        exceptionInt = remember { mutableStateOf(false) }
 
         FreeDiskShredderTheme {
             val driveNames: List<String> = getDriveNames()
 
             driveOptions.clear()
-
             for (driveName in driveNames) {
                 driveOptions.add(driveName)
             }
@@ -156,7 +297,7 @@ class MainActivity : ComponentActivity() {
 
                 OptionItem("Drive", driveOptions, driveIndex)
                 OptionItem("Repeat", repeatOptions, repeatIndex)
-                ListSurfaceItem()
+                ActionButton()
                 Box {
                     ProgressBar()
                     ProgressText()
@@ -165,9 +306,7 @@ class MainActivity : ComponentActivity() {
                     color = colorScheme.background,
                     modifier = Modifier
                         .fillMaxSize()
-                ) {
-
-                }
+                ) { }
             }
         }
     }
@@ -331,13 +470,15 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun ListSurfaceItem() {
+    fun ActionButton() {
         var text = "Shred empty space"
 
         if(waiting.value) {
             text = "Still cleaning old files.."
-        } else if(isRunning.value) {
+        } else if(serviceRunning.value) {
             text = "In progress.. Cancel"
+        } else if(isRunning.value) {
+            text = "Starting.."
         }
 
         Surface(
@@ -359,66 +500,15 @@ class MainActivity : ComponentActivity() {
                             if(waiting.value) {
                                 // do nothing
                             } else if(!isReady) {
-                                val handler = Handler(Looper.getMainLooper())
-                                
-                                val runnable = Runnable { waiting.value = false }
-
                                 waiting.value = true
 
-                                handler.postDelayed(runnable, 3000L)
-                            } else if(isRunning.value) {
+                                val handler = Handler(Looper.getMainLooper())
+                                handler.postDelayed({ waiting.value = false }, 3000L)
+                            } else if(MainService.isRunning) {
                                 isRunning.value = false
                                 MainService.isRunning = false
                             } else {
-                                val handler = Handler(Looper.getMainLooper())
-
-                                val runnable = object : Runnable {
-                                    override fun run() {
-                                        if(MainService.done) {
-                                            isRunning.value = false
-                                            percent.doubleValue = 0.0
-                                        } else if(isRunning.value) {
-                                            if(MainService.serviceRunIndex != runIndex.intValue) {
-                                                runIndex.intValue = MainService.serviceRunIndex
-                                            }
-
-                                            if(MainService.debugInt != debugInt.intValue) {
-                                                debugInt.intValue = MainService.debugInt
-                                            }
-
-                                            if(MainService.freeSpace > 0L) {
-                                                var servicePercent = MainService.bytesWritten.toDouble() / MainService.freeSpace.toDouble()
-
-                                                if(servicePercent < 0.0) {
-                                                    servicePercent = 0.0
-                                                } else if(servicePercent > 1.0) {
-                                                    servicePercent = 1.0
-                                                }
-
-                                                if(servicePercent != percent.doubleValue) {
-                                                    percent.doubleValue = servicePercent
-                                                }
-                                            } else if(percent.doubleValue != 0.0) {
-                                                percent.doubleValue = 0.0
-                                            }
-
-                                            handler.postDelayed(this, 1000L)
-                                        } else {
-                                            percent.doubleValue = 0.0
-                                        }
-                                    }
-                                }
-
-                                MainService.runCount = repeatOptions[repeatIndex.intValue].toInt()
-                                MainService.isRunning = true
-                                MainService.done = false
-
-                                isRunning.value = true
-
-                                val serviceIntent = Intent(this, MainService::class.java)
-                                startService(serviceIntent)
-
-                                handler.postDelayed(runnable, 1000L)
+                                startMainService()
                             }
                         }) {
                     ScaledText(text)
@@ -427,9 +517,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun deleteFiles(): Boolean {
-        var hasError = false
-
+    private fun deleteFiles() {
         try {
             val smallFile = File(this.filesDir, "small.bin")
             val mediumFile = File(this.filesDir, "medium.bin")
@@ -439,30 +527,20 @@ class MainActivity : ComponentActivity() {
                 if (smallFile.exists()) {
                     smallFile.delete()
                 }
-            } catch(e: Exception) {
-                hasError = true
-            }
+            } catch(_: Exception) { }
 
             try {
                 if (mediumFile.exists()) {
                     mediumFile.delete()
                 }
-            } catch(e: Exception) {
-                hasError = true
-            }
+            } catch(_: Exception) { }
 
             try {
                 if (largeFile.exists()) {
                     largeFile.delete()
                 }
-            } catch(e: Exception) {
-                hasError = true
-            }
-        } catch(e2: Exception) {
-            hasError = true
-        }
-
-        return hasError
+            } catch(_: Exception) { }
+        } catch(_: Exception) { }
     }
 
     private fun getDriveNames(): List<String> {

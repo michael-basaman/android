@@ -1,18 +1,8 @@
 package com.example.freediskshredder
 
-import android.Manifest
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.IBinder
-import android.service.notification.StatusBarNotification
-import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,7 +15,7 @@ import java.util.Random
 class MainService : Service() {
     companion object {
         var serviceRunning: Boolean = false
-        var isRunning: Boolean = true
+        var isRunning: Boolean = false
         var runCount: Int = 0
         var serviceRunIndex = 0
         var bytesWritten: Long = 0L
@@ -33,107 +23,53 @@ class MainService : Service() {
         var debugInt: Int = 0
         var debug: String = "no status"
         var done: Boolean = false
-        var notificationId = 0
+        val exception = ArrayList<String>()
 
         val lock = Any()
     }
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
-
-    private val channelId = "free_disk_shredder"
+    private val mainNotification = MainNotification()
 
     override fun onBind(intent: Intent): IBinder? {
         return null
     }
 
-    private fun clearNotification() {
-        if (notificationId > 0) {
-            try {
-                val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(notificationId)
+    override fun onCreate() {
+        super.onCreate()
 
-            } catch(_: Exception) { }
+        try {
+            mainNotification.createNotificationChannel(this)
+            // val notification = mainNotification.createPersistentNotification(this)
+            val notification = mainNotification.createNotification(this)
+
+            startForeground(
+                mainNotification.getNotificationId(this),
+                notification
+            )
+
+            serviceScope.launch {
+                mainNotification.updateNotifications(this@MainService)
+            }
+        } catch(e: Exception) {
+            exception.add("onCreate")
+            for(item in e.stackTrace) {
+                exception.add(item.toString())
+            }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
 
+        isRunning = false
         serviceJob.cancel()
-        clearNotification()
-    }
+        done = true
 
-    private fun createNotificationChannel(context: Context) {
-        val name = "Free Disk Shredder"
-        val importance = NotificationManager.IMPORTANCE_LOW
-
-        val channel = NotificationChannel(channelId, name, importance)
-
-        val notificationManager = context.getSystemService(NotificationManager::class.java)
-
-        notificationManager?.createNotificationChannel(channel)
-    }
-
-    private fun createNotification(context: Context): Notification {
-        val percentValue: String = getPercentValue()
-
-        val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher) // Replace with your notification icon
-            .setContentTitle("Free Disk Shredder")
-            .setContentText("Run $serviceRunIndex: $percentValue% complete")
-            .setOngoing(true)
-
-        return builder.build()
-    }
-
-    private fun createPersistentNotification(context: Context) {
-        val notificationManager = context.getSystemService(NotificationManager::class.java)
-        notificationManager?.notify(notificationId, createNotification(this))
-    }
-
-    private fun updateNotification(context: Context) {
-        if (notificationId > 0
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED) {
-            val notificationManager = NotificationManagerCompat.from(context)
-            notificationManager.notify(notificationId, createNotification(context))
-        }
-    }
-
-    private fun getPercentValue(): String {
-        var percent = 0.0
-
-        if(freeSpace > 0) {
-            percent = bytesWritten.toDouble() / freeSpace.toDouble()
-        }
-
-        if(percent < 0.0) {
-            percent = 0.0
-        } else if(percent > 1.0) {
-            percent = 1.0
-        }
-
-        return ((percent * 1000).toInt().toDouble() / 10.0).toString()
-    }
-
-    private fun getNotificationId(context: Context): Int {
-        val notificationManager = context.getSystemService(NotificationManager::class.java)
-        val notifications: Array<StatusBarNotification> = notificationManager.getActiveNotifications()
-
-        val existingNotifications: HashSet<Int> = HashSet()
-        for(notification in notifications) {
-            existingNotifications.add(notification.id)
-        }
-
-        var id = 0
-        while(true) {
-            id += 1
-
-            if(!existingNotifications.contains(id)) {
-                return id
-            }
-        }
+        try {
+            mainNotification.clearNotification(this)
+        } catch(_: Exception) { }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -150,45 +86,18 @@ class MainService : Service() {
             return START_NOT_STICKY
         }
 
-        try {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED
-            ) {
-                createNotificationChannel(this)
-
-                notificationId = getNotificationId(this)
-
-                createPersistentNotification(this)
-            }
-        } catch(_: Exception) { }
+        done = false
+        isRunning = true
 
         serviceScope.launch {
-            done = false
             runBackgroundTask()
+            isRunning = false
             done = true
             serviceRunning = false
-        }
-
-        serviceScope.launch {
-            updateNotifications()
-            clearNotification()
+            stopSelf()
         }
 
         return START_NOT_STICKY
-    }
-
-    private suspend fun updateNotifications() {
-        return withContext(Dispatchers.IO) {
-            try {
-                while(isRunning) {
-                    try {
-                        Thread.sleep(1000L)
-                    } catch(_: Exception) { }
-
-                    updateNotification(this@MainService)
-                }
-            } catch(_: Exception) { }
-        }
     }
 
     private suspend fun runBackgroundTask() {
@@ -196,9 +105,10 @@ class MainService : Service() {
             debug = "background"
             
             val random = Random()
-            val numBytes = 1024
+            val numBytes = 1024L * 1024L
 
-            val bytes = ByteArray(numBytes)
+            val bytes = ByteArray(numBytes.toInt())
+            val smallBytes = ByteArray(1024)
 
             val tinyFile = File(this@MainService.filesDir, "tiny.bin")
             val smallFile = File(this@MainService.filesDir, "small.bin")
@@ -232,15 +142,9 @@ class MainService : Service() {
                                 break
                             }
 
-                            for (j in 1..1024) {
-                                if(!isRunning) {
-                                    break
-                                }
-
-                                random.nextBytes(bytes)
-                                smallFile.writeBytes(bytes)
-                                bytesWritten += 1024L
-                            }
+                            random.nextBytes(bytes)
+                            smallFile.writeBytes(bytes)
+                            bytesWritten += numBytes
                         }
                     } catch (e: Exception) {
                         debug = "small"
@@ -255,15 +159,9 @@ class MainService : Service() {
                                 break
                             }
 
-                            for (j in 1..1024) {
-                                if(!isRunning) {
-                                    break
-                                }
-
-                                random.nextBytes(bytes)
-                                mediumFile.writeBytes(bytes)
-                                bytesWritten += 1024L
-                            }
+                            random.nextBytes(bytes)
+                            mediumFile.writeBytes(bytes)
+                            bytesWritten += numBytes
                         }
                     } catch (e: Exception) {
                         debug = "medium"
@@ -278,27 +176,31 @@ class MainService : Service() {
                                 break
                             }
 
-                            for (j in 1..1024) {
-                                if(!isRunning) {
-                                    break
-                                }
-
-                                random.nextBytes(bytes)
-                                largeFile.writeBytes(bytes)
-                                bytesWritten += 1024L
-                            }
+                            random.nextBytes(bytes)
+                            largeFile.writeBytes(bytes)
+                            bytesWritten += numBytes
                         }
                     } catch (e: Exception) {
                         debug = "large"
                     }
                 }
 
+                try {
+                    while (true) {
+                        if(!isRunning) {
+                            break
+                        }
+
+                        random.nextBytes(smallBytes)
+                        largeFile.writeBytes(smallBytes)
+                        bytesWritten += 1024L
+                    }
+                } catch (_: Exception) { }
+
                 if (deleteFiles()) {
                     debug = "final"
                 }
             }
-
-            isRunning = false
         }
     }
 
