@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
@@ -42,175 +41,114 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import com.example.freediskshredder.ui.theme.FreeDiskShredderTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
-
 class MainActivity : ComponentActivity() {
+    private val activityJob = Job()
+    private val activityScope = CoroutineScope(Dispatchers.Main + activityJob)
+    private var active = true
+
+    override fun onDestroy() {
+        super.onDestroy()
+
+        active = false
+        activityJob.cancel()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(null)
         enableEdgeToEdge()
+
         setContent {
             FreeDiskShredder()
         }
 
-        try {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    ActivityCompat.requestPermissions(
-                        this,
-                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                        1
-                    )
-                }
-            }
-        } catch(e: Exception) {
-            exception.add("POST_NOTIFICATIONS")
-            for(item in e.stackTrace) {
-                exception.add(item.toString())
-            }
+        activityScope.launch {
+            progressHandler()
         }
 
-        try {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.FOREGROUND_SERVICE),
-                    2
-                )
-            }
-        } catch(e: Exception) {
-            exception.add("FOREGROUND_SERVICE")
-            for(item in e.stackTrace) {
-                exception.add(item.toString())
-            }
-        }
-
-        try {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
-                    != PackageManager.PERMISSION_GRANTED) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    ActivityCompat.requestPermissions(
-                        this,
-                        arrayOf(Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC),
-                        3
-                    )
-                }
-            }
-        } catch(e: Exception) {
-            exception.add("FOREGROUND_SERVICE_DATA_SYNC")
-            for(item in e.stackTrace) {
-                exception.add(item.toString())
-            }
-        }
-
-        try {
+        if(!MainService.isRunning) {
             deleteFiles()
-        } catch(e: Exception) {
-            exception.add("deleteFiles")
-            for(item in e.stackTrace) {
-                exception.add(item.toString())
-            }
         }
 
         isReady = true
-
-        startExceptionHandler()
-        startProgressHandler()
     }
 
-    private fun startProgressHandler() {
-        val handler = Handler(Looper.getMainLooper())
+    private fun hasPermissions(): Boolean {
+        var hasAllPermissions = true
 
-        val runnable = object : Runnable {
-            override fun run() {
-                if(MainService.isRunning != serviceRunning.value) {
-                    serviceRunning.value = MainService.isRunning
-                }
-
-                if(MainService.done) {
-                    isRunning.value = false
-                    percent.doubleValue = 0.0
-                } else if(MainService.isRunning) {
-                    if(!isRunning.value) {
-                        isRunning.value = true
-                    }
-
-                    if(MainService.serviceRunIndex != runIndex.intValue) {
-                        runIndex.intValue = MainService.serviceRunIndex
-                    }
-
-                    if(MainService.debugInt != debugInt.intValue) {
-                        debugInt.intValue = MainService.debugInt
-                    }
-
-                    if(MainService.freeSpace > 0L) {
-                        var servicePercent = MainService.bytesWritten.toDouble() / MainService.freeSpace.toDouble()
-
-                        if(servicePercent < 0.0) {
-                            servicePercent = 0.0
-                        } else if(servicePercent > 1.0) {
-                            servicePercent = 1.0
-                        }
-
-                        if(servicePercent != percent.doubleValue) {
-                            percent.doubleValue = servicePercent
-                        }
-                    } else if(percent.doubleValue != 0.0) {
-                        percent.doubleValue = 0.0
-                    }
-                } else {
-                    percent.doubleValue = 0.0
-                }
-
-                handler.postDelayed(this, 1000L)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                hasAllPermissions = false
             }
         }
 
-        handler.postDelayed(runnable, 0L)
-    }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE)
+                != PackageManager.PERMISSION_GRANTED) {
+            hasAllPermissions = false
+        }
 
-    private fun startExceptionHandler() {
-        val handler = Handler(Looper.getMainLooper())
-
-        val runnable = object : Runnable {
-            override fun run() {
-                val arr = ArrayList<String>()
-
-                if (exception.size > 0) {
-                    for(item in exception) {
-                        arr.add(item)
-                    }
-                } else if (MainService.exception.size > 0) {
-                    for(item in MainService.exception) {
-                        arr.add(item)
-                    }
-                }
-
-                if(arr.size > 0) {
-                    setContent {
-                        Column(
-                            modifier = Modifier
-                                .safeDrawingPadding()
-                                .fillMaxSize()) {
-                            arr.forEach { item ->
-                                Text(text = item)
-                            }
-                        }
-                    }
-                } else {
-                    handler.postDelayed(this, 1000L)
-                }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+                    != PackageManager.PERMISSION_GRANTED) {
+                hasAllPermissions = false
             }
         }
 
-        handler.postDelayed(runnable, 1000L)
+        return hasAllPermissions
+    }
+
+    private fun requestPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    1
+                )
+            }
+        }
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.FOREGROUND_SERVICE),
+                2
+            )
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC),
+                    3
+                )
+            }
+        }
     }
 
     private fun startMainService() {
-        try {
+        var hasAllPermissions = hasPermissions()
+
+        if(!hasAllPermissions) {
+            requestPermissions()
+        }
+
+        hasAllPermissions = hasPermissions()
+
+        if(hasAllPermissions) {
             MainService.runCount = repeatOptions[repeatIndex.intValue].toInt()
             MainService.isRunning = true
             MainService.done = false
@@ -218,25 +156,62 @@ class MainActivity : ComponentActivity() {
             isRunning.value = true
 
             val serviceIntent = Intent(this, MainService::class.java)
+            startForegroundService(serviceIntent)
+        } else {
+            needsPermissions.value = true
+        }
+    }
 
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE)
-                == PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC
-                )
-                == PackageManager.PERMISSION_GRANTED
-            ) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-        } catch(e: Exception) {
-            exception.add("startMainService")
-            for(item in e.stackTrace) {
-                exception.add(item.toString())
+    private suspend fun progressHandler() {
+        return withContext(Dispatchers.IO) {
+            while(active) {
+                delay(250L)
+
+                if (MainService.isRunning != serviceRunning.value) {
+                    serviceRunning.value = MainService.isRunning
+                }
+
+                if (MainService.done) {
+                    isRunning.value = false
+                    percent.doubleValue = 0.0
+                } else if (MainService.isRunning) {
+                    if (!isRunning.value) {
+                        isRunning.value = true
+                    }
+
+                    if (MainService.serviceRunIndex != runIndex.intValue) {
+                        runIndex.intValue = MainService.serviceRunIndex
+                    }
+
+                    if (MainService.debugInt != debugInt.intValue) {
+                        debugInt.intValue = MainService.debugInt
+                    }
+
+                    if (MainService.bytesWritten != bytesWritten.longValue) {
+                        bytesWritten.longValue = MainService.bytesWritten
+                    }
+
+                    if (MainService.totalDiskSpace > 0L) {
+                        var servicePercent =
+                            (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() / MainService.totalDiskSpace.toDouble()
+
+                        if (MainService.freeSpaceLeft < 0L) {
+                            servicePercent = -1.0
+                        } else if (servicePercent < 0.0) {
+                            servicePercent = 0.0
+                        } else if (servicePercent > 1.0) {
+                            servicePercent = 1.0
+                        }
+
+                        if (servicePercent != percent.doubleValue) {
+                            percent.doubleValue = servicePercent
+                        }
+                    } else if (percent.doubleValue != 0.0) {
+                        percent.doubleValue = 0.0
+                    }
+                } else if (percent.doubleValue != 0.0) {
+                    percent.doubleValue = 0.0
+                }
             }
         }
     }
@@ -244,7 +219,6 @@ class MainActivity : ComponentActivity() {
     private val driveOptions = ArrayList<String>()
     private val repeatOptions = ArrayList<String>()
     private var isReady = false
-    private val exception = ArrayList<String>()
 
     private lateinit var runCount: MutableIntState
     private lateinit var runIndex: MutableIntState
@@ -258,6 +232,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var bytesWritten: MutableLongState
     private lateinit var freeSpace: MutableLongState
     private lateinit var waiting: MutableState<Boolean>
+    private lateinit var needsPermissions: MutableState<Boolean>
 
     private lateinit var exceptionInt: MutableState<Boolean>
 
@@ -276,6 +251,7 @@ class MainActivity : ComponentActivity() {
         freeSpace = remember { mutableLongStateOf(0L) }
         waiting = remember { mutableStateOf(false) }
         exceptionInt = remember { mutableStateOf(false) }
+        needsPermissions = remember { mutableStateOf(false) }
 
         FreeDiskShredderTheme {
             val driveNames: List<String> = getDriveNames()
@@ -386,7 +362,9 @@ class MainActivity : ComponentActivity() {
 
         var percentText = "Run $runIndexValue: $percentValue% complete"
 
-        if(percent.doubleValue < 0.0001) {
+        if(percent.doubleValue < 0.0) {
+            percentText = "Deleting temporary files.."
+        } else if(percent.doubleValue < 0.0001) {
             percentText = " "
         }
 
@@ -465,7 +443,6 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
-
         }
     }
 
@@ -479,6 +456,8 @@ class MainActivity : ComponentActivity() {
             text = "In progress.. Cancel"
         } else if(isRunning.value) {
             text = "Starting.."
+        } else if(needsPermissions.value) {
+            text = "Request Permissions"
         }
 
         Surface(
@@ -497,7 +476,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            if(waiting.value) {
+                            if(needsPermissions.value) {
+                                requestPermissions()
+
+                                if(hasPermissions()) {
+                                    needsPermissions.value = false
+                                }
+                            } else if(waiting.value) {
                                 // do nothing
                             } else if(!isReady) {
                                 waiting.value = true
@@ -519,27 +504,11 @@ class MainActivity : ComponentActivity() {
 
     private fun deleteFiles() {
         try {
-            val smallFile = File(this.filesDir, "small.bin")
-            val mediumFile = File(this.filesDir, "medium.bin")
             val largeFile = File(this.filesDir, "large.bin")
 
-            try {
-                if (smallFile.exists()) {
-                    smallFile.delete()
-                }
-            } catch(_: Exception) { }
-
-            try {
-                if (mediumFile.exists()) {
-                    mediumFile.delete()
-                }
-            } catch(_: Exception) { }
-
-            try {
-                if (largeFile.exists()) {
-                    largeFile.delete()
-                }
-            } catch(_: Exception) { }
+            if (largeFile.exists()) {
+                largeFile.delete()
+            }
         } catch(_: Exception) { }
     }
 
@@ -548,23 +517,23 @@ class MainActivity : ComponentActivity() {
 
         driveNames.add("Internal Storage")
 
-        try {
-            val externalStorageDirectory = Environment.getExternalStorageDirectory()
-
-            val rootDirectory = externalStorageDirectory.parentFile
-
-            if (rootDirectory != null && rootDirectory.isDirectory) {
-                val files: Array<File>? = rootDirectory.listFiles()
-
-                files?.let {
-                    for(file in files) {
-                        if (file.isDirectory && file.canRead()) {
-                            driveNames.add(file.name)
-                        }
-                    }
-                }
-            }
-        } catch(_: Exception) { }
+//        try {
+//            val externalStorageDirectory = Environment.getExternalStorageDirectory()
+//
+//            val rootDirectory = externalStorageDirectory.parentFile
+//
+//            if (rootDirectory != null && rootDirectory.isDirectory) {
+//                val files: Array<File>? = rootDirectory.listFiles()
+//
+//                files?.let {
+//                    for(file in files) {
+//                        if (file.isDirectory && file.canRead()) {
+//                            driveNames.add(file.name)
+//                        }
+//                    }
+//                }
+//            }
+//        } catch(_: Exception) { }
 
         return driveNames
     }

@@ -4,15 +4,15 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service.NOTIFICATION_SERVICE
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.service.notification.StatusBarNotification
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.example.freediskshredder.MainService.Companion.bytesWritten
-import com.example.freediskshredder.MainService.Companion.freeSpace
 import com.example.freediskshredder.MainService.Companion.isRunning
 import com.example.freediskshredder.MainService.Companion.serviceRunIndex
 import kotlinx.coroutines.Dispatchers
@@ -20,10 +20,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainNotification {
-//    constructor(context: Context) : this() {
-//        // this.context = context
-//        this.notificationId = setNotificationId()
-//    }
+    private val channelId: String = "freediskshredder"
+    private var notificationId: Int = 0
 
     fun createNotificationChannel(context: Context) {
         val name = "Free Disk Shredder"
@@ -31,34 +29,42 @@ class MainNotification {
 
         val channel = NotificationChannel(channelId, name, importance)
 
-        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        notificationId = setNotificationId(context, channel.hashCode())
 
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
         notificationManager?.createNotificationChannel(channel)
     }
 
-    fun getNotificationId(context: Context): Int {
-        if(notificationId == 0) {
-            notificationId = setNotificationId(context)
-        }
+    fun getNotificationId(): Int {
         return notificationId
     }
 
-    fun createPersistentNotification(context: Context): Notification {
-        val notificationManager = context.getSystemService(NotificationManager::class.java)
-        var notification: Notification = createNotification(context)
-
-        notificationManager?.notify(notificationId, notification)
-
-        return notification
-    }
-
     fun createNotification(context: Context): Notification {
-        val percentValue: String = getPercentValue()
+        val percent: Double = getPercent()
+
+        lateinit var text: String
+
+        if(serviceRunIndex == 0) {
+            text = "Starting"
+        } else if(percent < 0.0) {
+            text = "Run $serviceRunIndex: cleaning"
+        } else {
+            val percentValue = ((percent * 1000).toInt().toDouble() / 10.0).toString()
+            text = "Run $serviceRunIndex: $percentValue% complete"
+        }
+
+        val intent = Intent(context, MainActivity::class.java)
+
+        val pendingIntent = PendingIntent.getActivity(context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher) // Replace with your notification icon
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Free Disk Shredder")
-            .setContentText("Run $serviceRunIndex: $percentValue% complete")
+            .setContentText(text)
+            .setContentIntent(pendingIntent)
             .setOngoing(true)
 
         return builder.build()
@@ -66,29 +72,24 @@ class MainNotification {
 
     suspend fun updateNotifications(context: Context) {
         return withContext(Dispatchers.IO) {
-            try {
-                while(isRunning) {
-                    delay(500L)
+            while(isRunning) {
+                delay(5000L)
 
-                    if(isRunning) {
-                        updateNotification(context)
-                    }
+                if(isRunning) {
+                    updateNotification(context)
                 }
-            } catch(_: Exception) { }
+            }
         }
     }
 
     fun clearNotification(context: Context) {
         if (notificationId > 0) {
-            try {
-                val notificationManager = context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(notificationId)
-
-            } catch(_: Exception) { }
+            val notificationManager = context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(notificationId)
         }
     }
 
-    private fun setNotificationId(context: Context): Int {
+    private fun setNotificationId(context: Context, initial: Int): Int {
         val notificationManager = context.getSystemService(NotificationManager::class.java)
         val notifications: Array<StatusBarNotification> = notificationManager.getActiveNotifications()
 
@@ -97,13 +98,13 @@ class MainNotification {
             existingNotifications.add(notification.id)
         }
 
-        var id = 0
+        var id = initial
         while(true) {
-            id += 1
-
             if(!existingNotifications.contains(id)) {
                 return id
             }
+
+            id += 1
         }
     }
 
@@ -116,22 +117,21 @@ class MainNotification {
         }
     }
 
-    private fun getPercentValue(): String {
+    private fun getPercent(): Double {
         var percent = 0.0
 
-        if(freeSpace > 0) {
-            percent = bytesWritten.toDouble() / freeSpace.toDouble()
+        if(MainService.totalDiskSpace > 0L) {
+            percent = (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() / MainService.totalDiskSpace.toDouble()
         }
 
-        if(percent < 0.0) {
+        if(MainService.freeSpaceLeft < 0L) {
+            percent = -1.0
+        } else if(percent < 0.0) {
             percent = 0.0
         } else if(percent > 1.0) {
             percent = 1.0
         }
 
-        return ((percent * 1000).toInt().toDouble() / 10.0).toString()
+        return percent
     }
-
-    private val channelId = "free_disk_shredder"
-    private var notificationId: Int = 0
 }
