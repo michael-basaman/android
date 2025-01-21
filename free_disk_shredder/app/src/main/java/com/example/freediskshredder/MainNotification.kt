@@ -14,22 +14,33 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.freediskshredder.MainService.Companion.isRunning
+import com.example.freediskshredder.MainService.Companion.runCount
 import com.example.freediskshredder.MainService.Companion.serviceRunIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainNotification {
-    private val channelId: String = "freediskshredder"
+    private val channelId: String = "anticirculatory.diskshredder"
     private var notificationId: Int = 0
+    private lateinit var intent: Intent
+    private lateinit var pendingIntent: PendingIntent
 
     fun createNotificationChannel(context: Context) {
-        val name = "Free Disk Shredder"
+        val name = "Anticirculatory Disk Shredder"
         val importance = NotificationManager.IMPORTANCE_LOW
 
         val channel = NotificationChannel(channelId, name, importance)
 
         notificationId = setNotificationId(context, channel.hashCode())
+
+        intent = Intent(context, MainActivity::class.java)
+
+        pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val notificationManager = context.getSystemService(NotificationManager::class.java)
         notificationManager?.createNotificationChannel(channel)
@@ -41,28 +52,29 @@ class MainNotification {
 
     fun createNotification(context: Context): Notification {
         val percent: Double = getPercent()
-
-        lateinit var text: String
+        val text: String
 
         if(serviceRunIndex == 0) {
             text = "Starting"
         } else if(percent < 0.0) {
-            text = "Run $serviceRunIndex: cleaning"
+            if(runCount == 1) {
+                text = "Cleaning"
+            } else {
+                text = "Run $serviceRunIndex: Cleaning"
+            }
         } else {
             val percentValue = ((percent * 1000).toInt().toDouble() / 10.0).toString()
-            text = "Run $serviceRunIndex: $percentValue% complete"
+
+            if(runCount == 1) {
+                text = "$percentValue% complete"
+            } else {
+                text = "Run $serviceRunIndex: $percentValue% complete"
+            }
         }
-
-        val intent = Intent(context, MainActivity::class.java)
-
-        val pendingIntent = PendingIntent.getActivity(context,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Free Disk Shredder")
+            .setContentTitle("Disk Shredder")
             .setContentText(text)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -118,10 +130,12 @@ class MainNotification {
     }
 
     private fun getPercent(): Double {
-        var percent = 0.0
+        var percent: Double
 
         if(MainService.totalDiskSpace > 0L) {
             percent = (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() / MainService.totalDiskSpace.toDouble()
+        } else {
+            percent = 0.0
         }
 
         if(MainService.freeSpaceLeft < 0L) {

@@ -360,12 +360,16 @@ class MainActivity : ComponentActivity() {
         val runIndexValue = runIndex.intValue.toString()
         val percentValue = ((percent.doubleValue * 1000).toInt().toDouble() / 10.0).toString()
 
-        var percentText = "Run $runIndexValue: $percentValue% complete"
+        val percentText: String
 
         if(percent.doubleValue < 0.0) {
             percentText = "Deleting temporary files.."
         } else if(percent.doubleValue < 0.0001) {
             percentText = " "
+        } else if(runIndex.intValue == 1) {
+            percentText = "$percentValue% complete"
+        } else {
+            percentText = "Run $runIndexValue: $percentValue% complete"
         }
 
         Surface(
