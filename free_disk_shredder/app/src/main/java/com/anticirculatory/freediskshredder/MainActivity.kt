@@ -230,52 +230,56 @@ class MainActivity : ComponentActivity() {
     private val repeatOptions = ArrayList<String>()
     private var isReady = false
 
-    private lateinit var runCount: MutableIntState
-    private lateinit var runIndex: MutableIntState
-    private lateinit var percent: MutableDoubleState
     private lateinit var isRunning: MutableState<Boolean>
     private lateinit var serviceRunning: MutableState<Boolean>
-    private lateinit var driveIndex: MutableIntState
-    private lateinit var repeatIndex: MutableIntState
-    private lateinit var freeSpace: MutableLongState
     private lateinit var waiting: MutableState<Boolean>
     private lateinit var needsPermissions: MutableState<Boolean>
+
+    private lateinit var driveIndex: MutableIntState
+    private lateinit var repeatIndex: MutableIntState
+
+    private lateinit var runCount: MutableIntState
+    private lateinit var runIndex: MutableIntState
+
+    private lateinit var percent: MutableDoubleState
+    private lateinit var freeSpace: MutableLongState
 
     private lateinit var lastCompleteTimestamp: MutableLongState
     private lateinit var lastCompleteRunCount: MutableIntState
 
-    private lateinit var exceptionInt: MutableState<Boolean>
-
     @Composable
     fun FreeDiskShredder() {
-        runCount = remember { mutableIntStateOf(0) }
-        runIndex = remember { mutableIntStateOf(0) }
-        percent = remember { mutableDoubleStateOf(0.0) }
         isRunning = remember { mutableStateOf(false) }
         serviceRunning = remember { mutableStateOf(false) }
+        waiting = remember { mutableStateOf(false) }
+        needsPermissions = remember { mutableStateOf(false) }
+
         driveIndex = remember { mutableIntStateOf(0) }
         repeatIndex = remember { mutableIntStateOf(0) }
+
+        runCount = remember { mutableIntStateOf(0) }
+        runIndex = remember { mutableIntStateOf(0) }
+
+        percent = remember { mutableDoubleStateOf(0.0) }
         freeSpace = remember { mutableLongStateOf(0L) }
-        waiting = remember { mutableStateOf(false) }
-        exceptionInt = remember { mutableStateOf(false) }
-        needsPermissions = remember { mutableStateOf(false) }
+
         lastCompleteTimestamp = remember { mutableLongStateOf(0L) }
         lastCompleteRunCount = remember { mutableIntStateOf(1) }
 
+        val driveNames: List<String> = MainUtils.getDriveNames()
+
+        driveOptions.clear()
+        for (driveName in driveNames) {
+            driveOptions.add(driveName)
+        }
+
+        repeatOptions.clear()
+        repeatOptions.add("1")
+        repeatOptions.add("2")
+        repeatOptions.add("4")
+        repeatOptions.add("8")
+
         FreeDiskShredderTheme {
-            val driveNames: List<String> = MainUtils.getDriveNames()
-
-            driveOptions.clear()
-            for (driveName in driveNames) {
-                driveOptions.add(driveName)
-            }
-
-            repeatOptions.clear()
-            repeatOptions.add("1")
-            repeatOptions.add("2")
-            repeatOptions.add("4")
-            repeatOptions.add("8")
-
             Column(modifier = Modifier
                 .safeDrawingPadding()
                 .fillMaxSize()) {
@@ -333,9 +337,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun ProgressBar() {
         val surfaceWidth: MutableIntState = remember { mutableIntStateOf(0) }
-
         val percentPixels = surfaceWidth.intValue.toDouble() * percent.doubleValue
-
         val dpValue = percentPixels / LocalDensity.current.density.toDouble()
 
         Surface(
