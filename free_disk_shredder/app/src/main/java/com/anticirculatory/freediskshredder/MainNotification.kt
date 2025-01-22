@@ -1,6 +1,5 @@
 package com.anticirculatory.freediskshredder
 
-import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,11 +7,8 @@ import android.app.PendingIntent
 import android.app.Service.NOTIFICATION_SERVICE
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.service.notification.StatusBarNotification
-import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import com.anticirculatory.freediskshredder.MainService.Companion.isRunning
 import com.anticirculatory.freediskshredder.MainService.Companion.runCount
 import com.anticirculatory.freediskshredder.MainService.Companion.serviceRunIndex
@@ -60,6 +56,18 @@ class MainNotification {
         return notificationId
     }
 
+    private fun getNotificationCode(): Long {
+        return if(serviceRunIndex == 0) {
+            -1
+        } else if(MainService.freeSpaceLeft < 0L) {
+            -2
+        } else if(MainService.totalDiskSpace <= 0L) {
+            -3
+        } else {
+            1000L * (MainService.totalDiskSpace - MainService.freeSpaceLeft) / MainService.totalDiskSpace
+        }
+    }
+
     fun createNotification(context: Context): Notification {
         val percent: Double = getPercent()
         val text: String =
@@ -92,15 +100,26 @@ class MainNotification {
     }
 
     suspend fun updateNotifications(context: Context) {
-        return withContext(Dispatchers.IO) {
-            while(isRunning) {
-                delay(5000L)
+        return withContext(Dispatchers.Main) {
+            var lastNotificationCode = -1L
 
-                if(isRunning) {
+            while(isRunning) {
+                delay( 250L)
+
+                val notificationCode = getNotificationCode()
+
+                if(notificationCode != lastNotificationCode
+                        && isRunning) {
                     updateNotification(context)
+                    lastNotificationCode = notificationCode
                 }
             }
         }
+    }
+
+    private fun updateNotification(context: Context) {
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        notificationManager?.notify(notificationId, createNotification(context))
     }
 
     fun clearNotification(context: Context) {
@@ -126,15 +145,6 @@ class MainNotification {
             }
 
             id += 1
-        }
-    }
-
-    private fun updateNotification(context: Context) {
-        if (notificationId > 0
-                && ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED) {
-            val notificationManager = NotificationManagerCompat.from(context)
-            notificationManager.notify(notificationId, createNotification(context))
         }
     }
 
