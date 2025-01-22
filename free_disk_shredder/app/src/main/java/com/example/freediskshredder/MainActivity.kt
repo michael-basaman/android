@@ -48,6 +48,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val activityJob = Job()
@@ -59,6 +62,8 @@ class MainActivity : ComponentActivity() {
 
         active = false
         activityJob.cancel()
+
+        deleteFiles()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,6 +76,10 @@ class MainActivity : ComponentActivity() {
 
         activityScope.launch {
             progressHandler()
+        }
+
+        activityScope.launch {
+            saveHandler()
         }
 
         if(!MainService.isRunning) {
@@ -162,6 +171,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private suspend fun saveHandler() {
+        return withContext(Dispatchers.IO) {
+            val saveFile = File(this@MainActivity.filesDir, "state.txt")
+
+            while (active) {
+                delay(5000L)
+
+                if(!MainService.lastCompleteChanged
+                        && MainService.lastCompleteTimestamp > 0L
+                        && !saveFile.exists()) {
+                    val serviceLastCompleteTimestamp = MainService.lastCompleteTimestamp
+                    val serviceLastCompleteRunCount = MainService.lastCompleteRunCount
+
+                    val data = "lastCompleteTimestamp:$serviceLastCompleteTimestamp,lastCompleteRunCount:$serviceLastCompleteRunCount"
+                    saveFile.writeText(data)
+                }
+            }
+        }
+    }
+
     private suspend fun progressHandler() {
         return withContext(Dispatchers.IO) {
             while(active) {
@@ -212,6 +241,36 @@ class MainActivity : ComponentActivity() {
                 } else if (percent.doubleValue != 0.0) {
                     percent.doubleValue = 0.0
                 }
+
+                if (MainService.lastCompleteChanged) {
+                    try {
+                        val saveFile = File(this@MainActivity.filesDir, "state.txt")
+
+                        if(MainService.lastCompleteTimestamp > 0L) {
+                            val serviceLastCompleteTimestamp = MainService.lastCompleteTimestamp
+                            val serviceLastCompleteRunCount = MainService.lastCompleteRunCount
+
+                            val data = "lastCompleteTimestamp:$serviceLastCompleteTimestamp,lastCompleteRunCount:$serviceLastCompleteRunCount"
+                            saveFile.writeText(data)
+                        } else if(saveFile.exists()) {
+                            val data = saveFile.readText()
+                            val tokens1 = data.split(",")
+
+                            for (token1 in tokens1) {
+                                val tokens2 = token1.split(":")
+
+                                if (tokens2[0] == "lastCompleteTimestamp") {
+                                    lastCompleteTimestamp.longValue = tokens2[1].toLong()
+                                } else if (tokens2[0] == "lastCompleteRunCount") {
+                                    lastCompleteRunCount.intValue = tokens2[1].toInt()
+                                }
+                            }
+                        }
+
+                    } catch(_: Exception) { }
+
+                    MainService.lastCompleteChanged = false
+                }
             }
         }
     }
@@ -234,6 +293,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var waiting: MutableState<Boolean>
     private lateinit var needsPermissions: MutableState<Boolean>
 
+    private lateinit var lastCompleteTimestamp: MutableLongState
+    private lateinit var lastCompleteRunCount: MutableIntState
+
     private lateinit var exceptionInt: MutableState<Boolean>
 
     @Composable
@@ -252,6 +314,9 @@ class MainActivity : ComponentActivity() {
         waiting = remember { mutableStateOf(false) }
         exceptionInt = remember { mutableStateOf(false) }
         needsPermissions = remember { mutableStateOf(false) }
+
+        lastCompleteTimestamp = remember { mutableLongStateOf(0L) }
+        lastCompleteRunCount = remember { mutableIntStateOf(1) }
 
         FreeDiskShredderTheme {
             val driveNames: List<String> = getDriveNames()
@@ -298,25 +363,25 @@ class MainActivity : ComponentActivity() {
         Column {
             Text(
                 text = " ",
-                fontSize = 16.sp,
+                fontSize = 12.sp,
                 color = colorScheme.primary
             )
             Row {
                 Text(
                     text = " ",
-                    fontSize = 32.sp,
+                    fontSize = 24.sp,
                     color = colorScheme.primary
                 )
                 Text(
                     text = text,
-                    fontSize = 32.sp,
+                    fontSize = 24.sp,
                     color = colorScheme.primary
                 )
             }
 
             Text(
                 text = " ",
-                fontSize = 16.sp,
+                fontSize = 12.sp,
                 color = colorScheme.primary
             )
         }
@@ -360,12 +425,31 @@ class MainActivity : ComponentActivity() {
         val runIndexValue = runIndex.intValue.toString()
         val percentValue = ((percent.doubleValue * 1000).toInt().toDouble() / 10.0).toString()
 
-        val percentText: String
+        var percentText: String
 
         if(percent.doubleValue < 0.0) {
             percentText = "Deleting temporary files.."
         } else if(percent.doubleValue < 0.0001) {
-            percentText = " "
+            if(lastCompleteTimestamp.longValue > 0L) {
+                try {
+                    val locale: Locale = resources.configuration.getLocales().get(0)
+                    val sdf = SimpleDateFormat("MM/dd/yyyy hh:mmaa", locale)
+                    val lastCompleteDate = Date(lastCompleteTimestamp.longValue * 1000L)
+                    val dateFormat = sdf.format(lastCompleteDate)
+
+                    if(lastCompleteRunCount.intValue > 1) {
+                        val runCountInt = lastCompleteRunCount.intValue
+                        percentText = "Ran $runCountInt $dateFormat"
+                    } else {
+                        percentText = "Ran $dateFormat"
+                    }
+
+                } catch (_: Exception) {
+                    percentText = " "
+                }
+            } else {
+                percentText = " "
+            }
         } else if(runIndex.intValue == 1) {
             percentText = "$percentValue% complete"
         } else {
@@ -407,7 +491,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Text(
                         text = " ",
-                        fontSize = 16.sp,
+                        fontSize = 12.sp,
                         color = colorScheme.primary
                     )
                 }
@@ -417,22 +501,22 @@ class MainActivity : ComponentActivity() {
                     Row {
                         Text(
                             text = " ",
-                            fontSize = 32.sp,
+                            fontSize = 24.sp,
                             color = colorScheme.primary
                         )
                         Text(
                             text = label,
-                            fontSize = 32.sp,
+                            fontSize = 24.sp,
                             color = colorScheme.primary
                         )
                         Text(
                             text = ": ",
-                            fontSize = 32.sp,
+                            fontSize = 24.sp,
                             color = colorScheme.primary
                         )
                         Text(
                             text = options[index.intValue],
-                            fontSize = 32.sp,
+                            fontSize = 24.sp,
                             color = colorScheme.primary
                         )
                     }
@@ -442,7 +526,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Text(
                         text = " ",
-                        fontSize = 16.sp,
+                        fontSize = 12.sp,
                         color = colorScheme.primary
                     )
                 }
@@ -461,7 +545,7 @@ class MainActivity : ComponentActivity() {
         } else if(isRunning.value) {
             text = "Starting.."
         } else if(needsPermissions.value) {
-            text = "Request Permissions"
+            text = "Check Permissions"
         }
 
         Surface(

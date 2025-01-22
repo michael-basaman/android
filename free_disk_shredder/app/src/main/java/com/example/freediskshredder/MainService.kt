@@ -17,6 +17,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.time.Instant
 import java.util.Random
 
 
@@ -32,6 +33,10 @@ class MainService : Service() {
         var debugInt: Int = 0
         var done: Boolean = false
         var totalDiskSpace: Long = 0L
+
+        var lastCompleteTimestamp: Long = 0L
+        var lastCompleteRunCount: Int = 0
+        var lastCompleteChanged: Boolean = true
 
         val lock = Any()
     }
@@ -73,6 +78,8 @@ class MainService : Service() {
 
         serviceJob.cancel()
         mainNotification.clearNotification(this)
+
+        deleteFiles()
 
         synchronized(lock) {
             serviceRunning = false
@@ -175,7 +182,11 @@ class MainService : Service() {
                 deleteFiles()
             }
 
+            lastCompleteTimestamp = Instant.now().epochSecond
+            lastCompleteRunCount = runCount
+            lastCompleteChanged = true
             isRunning = false
+
             stopSelf()
         }
     }
