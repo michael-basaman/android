@@ -184,6 +184,12 @@ class MainService : Service() {
 
             lastCompleteTimestamp = Instant.now().epochSecond
             lastCompleteRunCount = runCount
+
+            val saveFile = File(this@MainService.filesDir, "state.txt")
+
+            val data = "lastCompleteTimestamp:$lastCompleteTimestamp,lastCompleteRunCount:$lastCompleteRunCount"
+            saveFile.writeText(data)
+
             lastCompleteChanged = true
             isRunning = false
 

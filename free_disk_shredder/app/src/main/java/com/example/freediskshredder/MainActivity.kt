@@ -247,11 +247,8 @@ class MainActivity : ComponentActivity() {
                         val saveFile = File(this@MainActivity.filesDir, "state.txt")
 
                         if(MainService.lastCompleteTimestamp > 0L) {
-                            val serviceLastCompleteTimestamp = MainService.lastCompleteTimestamp
-                            val serviceLastCompleteRunCount = MainService.lastCompleteRunCount
-
-                            val data = "lastCompleteTimestamp:$serviceLastCompleteTimestamp,lastCompleteRunCount:$serviceLastCompleteRunCount"
-                            saveFile.writeText(data)
+                            lastCompleteTimestamp.longValue = MainService.lastCompleteTimestamp
+                            lastCompleteRunCount.intValue = MainService.lastCompleteRunCount
                         } else if(saveFile.exists()) {
                             val data = saveFile.readText()
                             val tokens1 = data.split(",")
@@ -266,7 +263,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-
                     } catch(_: Exception) { }
 
                     MainService.lastCompleteChanged = false
