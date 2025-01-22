@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -85,9 +84,7 @@ class MainActivity : ComponentActivity() {
             saveHandler()
         }
 
-        if(MainService.isRunning) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
+        if(!MainService.isRunning) {
             MainService.deleteFiles(this)
         }
 
@@ -171,8 +168,6 @@ class MainActivity : ComponentActivity() {
 
             val serviceIntent = Intent(this, MainService::class.java)
             startForegroundService(serviceIntent)
-
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             needsPermissions.value = true
         }
@@ -210,7 +205,6 @@ class MainActivity : ComponentActivity() {
                 if (MainService.done) {
                     isRunning.value = false
                     percent.doubleValue = 0.0
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else if (MainService.isRunning) {
                     if (!isRunning.value) {
                         isRunning.value = true

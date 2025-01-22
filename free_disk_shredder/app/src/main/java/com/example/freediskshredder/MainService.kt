@@ -88,8 +88,6 @@ class MainService : Service() {
         serviceJob.cancel()
         mainNotification.clearNotification(this)
 
-        deleteFiles(this)
-
         synchronized(lock) {
             serviceRunning = false
             done = true
@@ -200,15 +198,19 @@ class MainService : Service() {
                 deleteFiles(this@MainService)
             }
 
-            lastCompleteTimestamp = Instant.now().epochSecond
-            lastCompleteRunCount = runCount
+            if(isRunning) {
+                lastCompleteTimestamp = Instant.now().epochSecond
+                lastCompleteRunCount = runCount
 
-            val saveFile = File(this@MainService.filesDir, "state.txt")
+                val saveFile = File(this@MainService.filesDir, "state.txt")
 
-            val data = "lastCompleteTimestamp:$lastCompleteTimestamp,lastCompleteRunCount:$lastCompleteRunCount"
-            saveFile.writeText(data)
+                val data =
+                    "lastCompleteTimestamp:$lastCompleteTimestamp,lastCompleteRunCount:$lastCompleteRunCount"
+                saveFile.writeText(data)
 
-            lastCompleteChanged = true
+                lastCompleteChanged = true
+            }
+
             isRunning = false
 
             stopSelf()
