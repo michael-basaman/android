@@ -1,4 +1,4 @@
-package com.example.freediskshredder
+package com.anticirculatory.freediskshredder
 
 import android.Manifest
 import android.app.Notification
@@ -13,20 +13,31 @@ import android.service.notification.StatusBarNotification
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.example.freediskshredder.MainService.Companion.isRunning
-import com.example.freediskshredder.MainService.Companion.runCount
-import com.example.freediskshredder.MainService.Companion.serviceRunIndex
+import com.anticirculatory.freediskshredder.MainService.Companion.isRunning
+import com.anticirculatory.freediskshredder.MainService.Companion.runCount
+import com.anticirculatory.freediskshredder.MainService.Companion.serviceRunIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainNotification {
-    private val channelId: String = "anticirculatory.freediskshredder"
+    private lateinit var channelId: String
     private var notificationId: Int = 0
     private lateinit var intent: Intent
     private lateinit var pendingIntent: PendingIntent
 
     fun createNotificationChannel(context: Context) {
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+
+        while(true) {
+            val randomString = MainUtils.getRandomString(8)
+
+            if (notificationManager.getNotificationChannel(randomString) == null) {
+                channelId = randomString
+                break
+            }
+        }
+
         val name = "Anticirculatory Disk Shredder"
         val importance = NotificationManager.IMPORTANCE_LOW
 
@@ -42,7 +53,6 @@ class MainNotification {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        val notificationManager = context.getSystemService(NotificationManager::class.java)
         notificationManager?.createNotificationChannel(channel)
     }
 

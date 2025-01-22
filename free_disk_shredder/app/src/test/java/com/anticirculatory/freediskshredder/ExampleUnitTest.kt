@@ -1,4 +1,4 @@
-package com.example.freediskshredder
+package com.anticirculatory.freediskshredder
 
 import org.junit.Test
 

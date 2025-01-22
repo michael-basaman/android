@@ -1,4 +1,4 @@
-package com.example.freediskshredder.ui.theme
+package com.anticirculatory.freediskshredder.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

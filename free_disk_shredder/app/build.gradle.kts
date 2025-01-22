@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.freediskshredder"
+    namespace = "com.anticirculatory.freediskshredder"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.freediskshredder"
+        applicationId = "com.anticirculatory.freediskshredder"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

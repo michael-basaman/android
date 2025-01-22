@@ -1,13 +1,9 @@
-package com.example.freediskshredder
+package com.anticirculatory.freediskshredder
 
 import android.app.NotificationManager
 import android.app.Service
-import android.app.usage.StorageStatsManager
-import android.content.Context
 import android.content.Intent
-import android.os.Environment
 import android.os.IBinder
-import android.os.storage.StorageManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,12 +21,12 @@ class MainService : Service() {
     companion object {
         var serviceRunning: Boolean = false
         var isRunning: Boolean = false
+        var done: Boolean = false
+
         var runCount: Int = 0
         var serviceRunIndex = 0
-        var freeSpace: Long = 0L
+
         var freeSpaceLeft: Long = 0L
-        var debugInt: Int = 0
-        var done: Boolean = false
         var totalDiskSpace: Long = 0L
 
         var lastCompleteTimestamp: Long = 0L
@@ -38,16 +34,6 @@ class MainService : Service() {
         var lastCompleteChanged: Boolean = true
 
         val lock = Any()
-
-        fun deleteFiles(context: Context) {
-            try {
-                val largeFile = File(context.filesDir, "large.bin")
-
-                if (largeFile.exists()) {
-                    largeFile.delete()
-                }
-            } catch(_: Exception) { }
-        }
     }
 
     private val serviceJob = Job()
@@ -135,14 +121,11 @@ class MainService : Service() {
                     tinyFile.writeBytes(bytes)
                 }
 
-                totalDiskSpace = getTotalDiskSpace(this@MainService)
-
-                freeSpace = tinyFile.freeSpace
+                totalDiskSpace = MainUtils.getTotalDiskSpace(this@MainService)
                 freeSpaceLeft = -1L
-                
                 serviceRunIndex = runIndex
 
-                deleteFiles(this@MainService)
+                MainUtils.deleteFiles(this@MainService)
 
                 freeSpaceLeft = tinyFile.freeSpace
 
@@ -195,7 +178,7 @@ class MainService : Service() {
                 }
 
                 freeSpaceLeft = -1L
-                deleteFiles(this@MainService)
+                MainUtils.deleteFiles(this@MainService)
             }
 
             if(isRunning) {
@@ -212,22 +195,7 @@ class MainService : Service() {
             }
 
             isRunning = false
-
             stopSelf()
         }
     }
-
-    private fun getTotalDiskSpace(context: Context): Long {
-        try {
-            val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
-            val uuid = storageManager.getUuidForPath(Environment.getDataDirectory())
-            val storageStatsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
-
-            return storageStatsManager.getTotalBytes(uuid)
-        } catch (_: Exception) {
-            return 0L
-        }
-    }
-
-
 }
