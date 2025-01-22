@@ -102,7 +102,7 @@ class MainNotification {
     }
 
     suspend fun updateNotifications(context: Context) {
-        return withContext(Dispatchers.Main) {
+        return withContext(Dispatchers.Default) {
             var lastNotificationCode = -1L
 
             while(isRunning) {

@@ -149,7 +149,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun progressHandler() {
-        return withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.Default) {
             while(active) {
                 delay(250L)
 
