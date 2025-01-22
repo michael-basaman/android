@@ -21,7 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainNotification {
-    private val channelId: String = "anticirculatory.diskshredder"
+    private val channelId: String = "anticirculatory.freediskshredder"
     private var notificationId: Int = 0
     private lateinit var intent: Intent
     private lateinit var pendingIntent: PendingIntent
@@ -52,25 +52,24 @@ class MainNotification {
 
     fun createNotification(context: Context): Notification {
         val percent: Double = getPercent()
-        val text: String
-
-        if(serviceRunIndex == 0) {
-            text = "Starting"
-        } else if(percent < 0.0) {
-            if(runCount == 1) {
-                text = "Cleaning"
+        val text: String =
+            if(serviceRunIndex == 0) {
+                "Starting"
+            } else if(percent < 0.0) {
+                if(runCount == 1) {
+                    "Cleaning"
+                } else {
+                    "Run $serviceRunIndex: Cleaning"
+                }
             } else {
-                text = "Run $serviceRunIndex: Cleaning"
-            }
-        } else {
-            val percentValue = ((percent * 1000).toInt().toDouble() / 10.0).toString()
+                val percentValue = ((percent * 1000).toInt().toDouble() / 10.0).toString()
 
-            if(runCount == 1) {
-                text = "$percentValue% complete"
-            } else {
-                text = "Run $serviceRunIndex: $percentValue% complete"
+                if(runCount == 1) {
+                    "$percentValue% complete"
+                } else {
+                    "Run $serviceRunIndex: $percentValue% complete"
+                }
             }
-        }
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -130,13 +129,12 @@ class MainNotification {
     }
 
     private fun getPercent(): Double {
-        var percent: Double
-
-        if(MainService.totalDiskSpace > 0L) {
-            percent = (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() / MainService.totalDiskSpace.toDouble()
-        } else {
-            percent = 0.0
-        }
+        var percent: Double =
+            if(MainService.totalDiskSpace > 0L) {
+                (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() / MainService.totalDiskSpace.toDouble()
+            } else {
+                0.0
+            }
 
         if(MainService.freeSpaceLeft < 0L) {
             percent = -1.0
