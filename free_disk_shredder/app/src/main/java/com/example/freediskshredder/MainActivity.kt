@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -63,7 +64,9 @@ class MainActivity : ComponentActivity() {
         active = false
         activityJob.cancel()
 
-        deleteFiles()
+        if(!MainService.isRunning) {
+            MainService.deleteFiles(this)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,8 +85,10 @@ class MainActivity : ComponentActivity() {
             saveHandler()
         }
 
-        if(!MainService.isRunning) {
-            deleteFiles()
+        if(MainService.isRunning) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            MainService.deleteFiles(this)
         }
 
         isReady = true
@@ -166,6 +171,8 @@ class MainActivity : ComponentActivity() {
 
             val serviceIntent = Intent(this, MainService::class.java)
             startForegroundService(serviceIntent)
+
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             needsPermissions.value = true
         }
@@ -203,6 +210,7 @@ class MainActivity : ComponentActivity() {
                 if (MainService.done) {
                     isRunning.value = false
                     percent.doubleValue = 0.0
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else if (MainService.isRunning) {
                     if (!isRunning.value) {
                         isRunning.value = true
@@ -214,10 +222,6 @@ class MainActivity : ComponentActivity() {
 
                     if (MainService.debugInt != debugInt.intValue) {
                         debugInt.intValue = MainService.debugInt
-                    }
-
-                    if (MainService.bytesWritten != bytesWritten.longValue) {
-                        bytesWritten.longValue = MainService.bytesWritten
                     }
 
                     if (MainService.totalDiskSpace > 0L) {
@@ -244,22 +248,24 @@ class MainActivity : ComponentActivity() {
 
                 if (MainService.lastCompleteChanged) {
                     try {
-                        val saveFile = File(this@MainActivity.filesDir, "state.txt")
-
                         if(MainService.lastCompleteTimestamp > 0L) {
                             lastCompleteTimestamp.longValue = MainService.lastCompleteTimestamp
                             lastCompleteRunCount.intValue = MainService.lastCompleteRunCount
-                        } else if(saveFile.exists()) {
-                            val data = saveFile.readText()
-                            val tokens1 = data.split(",")
+                        } else {
+                            val saveFile = File(this@MainActivity.filesDir, "state.txt")
 
-                            for (token1 in tokens1) {
-                                val tokens2 = token1.split(":")
+                            if(saveFile.exists()) {
+                                val data = saveFile.readText()
+                                val tokens1 = data.split(",")
 
-                                if (tokens2[0] == "lastCompleteTimestamp") {
-                                    lastCompleteTimestamp.longValue = tokens2[1].toLong()
-                                } else if (tokens2[0] == "lastCompleteRunCount") {
-                                    lastCompleteRunCount.intValue = tokens2[1].toInt()
+                                for (token1 in tokens1) {
+                                    val tokens2 = token1.split(":")
+
+                                    if (tokens2[0] == "lastCompleteTimestamp") {
+                                        lastCompleteTimestamp.longValue = tokens2[1].toLong()
+                                    } else if (tokens2[0] == "lastCompleteRunCount") {
+                                        lastCompleteRunCount.intValue = tokens2[1].toInt()
+                                    }
                                 }
                             }
                         }
@@ -268,6 +274,28 @@ class MainActivity : ComponentActivity() {
                     MainService.lastCompleteChanged = false
                 }
             }
+        }
+    }
+
+    private fun actionHandler() {
+        if(needsPermissions.value) {
+            requestPermissions()
+
+            if(hasPermissions()) {
+                needsPermissions.value = false
+            }
+        } else if(waiting.value) {
+            // do nothing
+        } else if(!isReady) {
+            waiting.value = true
+
+            val handler = Handler(Looper.getMainLooper())
+            handler.postDelayed({ waiting.value = false }, 3000L)
+        } else if(MainService.isRunning) {
+            isRunning.value = false
+            MainService.isRunning = false
+        } else {
+            startMainService()
         }
     }
 
@@ -284,7 +312,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var repeatIndex: MutableIntState
     private lateinit var debugString: MutableState<String>
     private lateinit var debugInt: MutableIntState
-    private lateinit var bytesWritten: MutableLongState
     private lateinit var freeSpace: MutableLongState
     private lateinit var waiting: MutableState<Boolean>
     private lateinit var needsPermissions: MutableState<Boolean>
@@ -305,7 +332,6 @@ class MainActivity : ComponentActivity() {
         repeatIndex = remember { mutableIntStateOf(0) }
         debugString = remember { mutableStateOf("uninitialized") }
         debugInt = remember { mutableIntStateOf(0) }
-        bytesWritten = remember { mutableLongStateOf(0L) }
         freeSpace = remember { mutableLongStateOf(0L) }
         waiting = remember { mutableStateOf(false) }
         exceptionInt = remember { mutableStateOf(false) }
@@ -532,17 +558,18 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun ActionButton() {
-        var text = "Shred empty space"
-
-        if(waiting.value) {
-            text = "Still cleaning old files.."
-        } else if(serviceRunning.value) {
-            text = "In progress.. Cancel"
-        } else if(isRunning.value) {
-            text = "Starting.."
-        } else if(needsPermissions.value) {
-            text = "Check Permissions"
-        }
+        val text: String =
+            if(waiting.value) {
+                "Still cleaning old files.."
+            } else if(serviceRunning.value) {
+                "In progress.. Cancel"
+            } else if(isRunning.value) {
+                "Starting.."
+            } else if(needsPermissions.value) {
+                "Check Permissions"
+            } else {
+                "Shred empty space"
+            }
 
         Surface(
             color = colorScheme.tertiary,
@@ -560,40 +587,12 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            if(needsPermissions.value) {
-                                requestPermissions()
-
-                                if(hasPermissions()) {
-                                    needsPermissions.value = false
-                                }
-                            } else if(waiting.value) {
-                                // do nothing
-                            } else if(!isReady) {
-                                waiting.value = true
-
-                                val handler = Handler(Looper.getMainLooper())
-                                handler.postDelayed({ waiting.value = false }, 3000L)
-                            } else if(MainService.isRunning) {
-                                isRunning.value = false
-                                MainService.isRunning = false
-                            } else {
-                                startMainService()
-                            }
+                            actionHandler()
                         }) {
                     ScaledText(text)
                 }
             }
         }
-    }
-
-    private fun deleteFiles() {
-        try {
-            val largeFile = File(this.filesDir, "large.bin")
-
-            if (largeFile.exists()) {
-                largeFile.delete()
-            }
-        } catch(_: Exception) { }
     }
 
     private fun getDriveNames(): List<String> {

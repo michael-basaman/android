@@ -27,7 +27,6 @@ class MainService : Service() {
         var isRunning: Boolean = false
         var runCount: Int = 0
         var serviceRunIndex = 0
-        var bytesWritten: Long = 0L
         var freeSpace: Long = 0L
         var freeSpaceLeft: Long = 0L
         var debugInt: Int = 0
@@ -39,6 +38,16 @@ class MainService : Service() {
         var lastCompleteChanged: Boolean = true
 
         val lock = Any()
+
+        fun deleteFiles(context: Context) {
+            try {
+                val largeFile = File(context.filesDir, "large.bin")
+
+                if (largeFile.exists()) {
+                    largeFile.delete()
+                }
+            } catch(_: Exception) { }
+        }
     }
 
     private val serviceJob = Job()
@@ -79,7 +88,7 @@ class MainService : Service() {
         serviceJob.cancel()
         mainNotification.clearNotification(this)
 
-        deleteFiles()
+        deleteFiles(this)
 
         synchronized(lock) {
             serviceRunning = false
@@ -112,7 +121,6 @@ class MainService : Service() {
     private suspend fun runBackgroundTask() {
         return withContext(Dispatchers.IO) {
             val random = Random()
-            val numBytes = 1024L * 1024L
 
             val bytes = ByteArray(1024)
 
@@ -131,17 +139,16 @@ class MainService : Service() {
 
                 totalDiskSpace = getTotalDiskSpace(this@MainService)
 
-                bytesWritten = 0L
-
                 freeSpace = tinyFile.freeSpace
                 freeSpaceLeft = -1L
                 
                 serviceRunIndex = runIndex
 
-                deleteFiles()
+                deleteFiles(this@MainService)
 
                 freeSpaceLeft = tinyFile.freeSpace
-                var currentFreeSpace: Long
+
+                var writeCount = 0
 
                 if (isRunning) {
                     try {
@@ -150,6 +157,8 @@ class MainService : Service() {
 
                         try {
                             var writing = true
+
+                            var lastFileSize = 0L
 
                             while (writing) {
                                 if (!isRunning) {
@@ -161,15 +170,24 @@ class MainService : Service() {
                                     bufferedOutputStream.write(bytes)
                                 }
                                 bufferedOutputStream.flush()
+                                writeCount++
 
-                                bytesWritten += numBytes
+                                if(writeCount % 16 == 0) {
+                                    freeSpaceLeft = tinyFile.freeSpace
+                                }
 
-                                currentFreeSpace = tinyFile.freeSpace
-                                freeSpaceLeft = tinyFile.freeSpace
+                                if(writeCount % 32 == 0) {
+                                    if (largeFile.exists()) {
+                                        val fileSize: Long = largeFile.length()
 
-                                if(currentFreeSpace.toDouble() / totalDiskSpace.toDouble() < 0.01
-                                        && freeSpaceLeft.toDouble() / totalDiskSpace.toDouble() > 0.1) {
-                                    writing = false
+                                        if (fileSize <= lastFileSize) {
+                                            writing = false
+                                        } else {
+                                            lastFileSize = fileSize
+                                        }
+                                    } else {
+                                        writing = false
+                                    }
                                 }
                             }
                         } catch(_: IOException) { }
@@ -179,7 +197,7 @@ class MainService : Service() {
                 }
 
                 freeSpaceLeft = -1L
-                deleteFiles()
+                deleteFiles(this@MainService)
             }
 
             lastCompleteTimestamp = Instant.now().epochSecond
@@ -209,13 +227,5 @@ class MainService : Service() {
         }
     }
 
-    private fun deleteFiles() {
-        try {
-            val largeFile = File(this.filesDir, "large.bin")
 
-            if (largeFile.exists()) {
-                largeFile.delete()
-            }
-        } catch(_: Exception) { }
-    }
 }
