@@ -64,7 +64,9 @@ class MainNotification {
         } else if(MainService.totalDiskSpace <= 0L) {
             -3
         } else {
-            1000L * (MainService.totalDiskSpace - MainService.freeSpaceLeft) / MainService.totalDiskSpace
+            1000L *
+                    (MainService.totalDiskSpace - MainService.freeSpaceLeft) /
+                    MainService.totalDiskSpace
         }
     }
 
@@ -124,14 +126,16 @@ class MainNotification {
 
     fun clearNotification(context: Context) {
         if (notificationId > 0) {
-            val notificationManager = context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            val notificationManager = context.getSystemService(NOTIFICATION_SERVICE)
+                    as NotificationManager
             notificationManager.cancel(notificationId)
         }
     }
 
     private fun setNotificationId(context: Context, initial: Int): Int {
         val notificationManager = context.getSystemService(NotificationManager::class.java)
-        val notifications: Array<StatusBarNotification> = notificationManager.getActiveNotifications()
+        val notifications: Array<StatusBarNotification>
+                = notificationManager.getActiveNotifications()
 
         val existingNotifications: HashSet<Int> = HashSet()
         for(notification in notifications) {
@@ -151,7 +155,8 @@ class MainNotification {
     private fun getPercent(): Double {
         var percent: Double =
             if(MainService.totalDiskSpace > 0L) {
-                (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() / MainService.totalDiskSpace.toDouble()
+                (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() /
+                        MainService.totalDiskSpace.toDouble()
             } else {
                 0.0
             }

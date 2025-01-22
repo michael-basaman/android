@@ -50,9 +50,11 @@ class MainUtils {
 
         fun getTotalDiskSpace(context: Context): Long {
             try {
-                val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+                val storageManager = context.getSystemService(Context.STORAGE_SERVICE)
+                        as StorageManager
                 val uuid = storageManager.getUuidForPath(Environment.getDataDirectory())
-                val storageStatsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+                val storageStatsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE)
+                        as StorageStatsManager
 
                 return storageStatsManager.getTotalBytes(uuid)
             } catch (_: Exception) {
@@ -64,19 +66,22 @@ class MainUtils {
             var hasAllPermissions = true
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
+                if (ActivityCompat.checkSelfPermission(activity,
+                        Manifest.permission.POST_NOTIFICATIONS)
                     != PackageManager.PERMISSION_GRANTED) {
                     hasAllPermissions = false
                 }
             }
 
-            if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.FOREGROUND_SERVICE)
+            if (ActivityCompat.checkSelfPermission(activity,
+                    Manifest.permission.FOREGROUND_SERVICE)
                 != PackageManager.PERMISSION_GRANTED) {
                 hasAllPermissions = false
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+                if (ActivityCompat.checkSelfPermission(activity,
+                        Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
                     != PackageManager.PERMISSION_GRANTED) {
                     hasAllPermissions = false
                 }
@@ -87,7 +92,8 @@ class MainUtils {
 
         fun requestPermissions(activity: MainActivity) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
+                if (ActivityCompat.checkSelfPermission(activity,
+                        Manifest.permission.POST_NOTIFICATIONS)
                     != PackageManager.PERMISSION_GRANTED
                 ) {
                     ActivityCompat.requestPermissions(
@@ -98,7 +104,8 @@ class MainUtils {
                 }
             }
 
-            if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.FOREGROUND_SERVICE)
+            if (ActivityCompat.checkSelfPermission(activity,
+                    Manifest.permission.FOREGROUND_SERVICE)
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(
                     activity,
@@ -108,7 +115,8 @@ class MainUtils {
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
+                if (ActivityCompat.checkSelfPermission(activity,
+                        Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC)
                     != PackageManager.PERMISSION_GRANTED) {
                     ActivityCompat.requestPermissions(
                         activity,

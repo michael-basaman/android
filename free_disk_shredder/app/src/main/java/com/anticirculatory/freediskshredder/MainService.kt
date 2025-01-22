@@ -188,7 +188,9 @@ class MainService : Service() {
                 val saveFile = File(this@MainService.filesDir, "state.txt")
 
                 val data =
-                    "lastCompleteTimestamp:$lastCompleteTimestamp,lastCompleteRunCount:$lastCompleteRunCount"
+                    "lastCompleteTimestamp:$lastCompleteTimestamp," +
+                            "lastCompleteRunCount:$lastCompleteRunCount"
+
                 saveFile.writeText(data)
 
                 lastCompleteChanged = true

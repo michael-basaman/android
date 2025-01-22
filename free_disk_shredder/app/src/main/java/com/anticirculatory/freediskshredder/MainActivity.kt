@@ -53,6 +53,23 @@ class MainActivity : ComponentActivity() {
     private val activityScope = CoroutineScope(Dispatchers.Main + activityJob)
     private var active = true
 
+    private lateinit var isRunning: MutableState<Boolean>
+    private lateinit var serviceRunning: MutableState<Boolean>
+    private lateinit var waiting: MutableState<Boolean>
+    private lateinit var needsPermissions: MutableState<Boolean>
+
+    private lateinit var driveIndex: MutableIntState
+    private lateinit var repeatIndex: MutableIntState
+
+    private lateinit var runCount: MutableIntState
+    private lateinit var runIndex: MutableIntState
+
+    private lateinit var percent: MutableDoubleState
+    private lateinit var freeSpace: MutableLongState
+
+    private lateinit var lastCompleteTimestamp: MutableLongState
+    private lateinit var lastCompleteRunCount: MutableIntState
+
     override fun onDestroy() {
         super.onDestroy()
 
@@ -123,7 +140,8 @@ class MainActivity : ComponentActivity() {
                     val serviceLastCompleteTimestamp = MainService.lastCompleteTimestamp
                     val serviceLastCompleteRunCount = MainService.lastCompleteRunCount
 
-                    val data = "lastCompleteTimestamp:$serviceLastCompleteTimestamp,lastCompleteRunCount:$serviceLastCompleteRunCount"
+                    val data = "lastCompleteTimestamp:$serviceLastCompleteTimestamp," +
+                            "lastCompleteRunCount:$serviceLastCompleteRunCount"
                     saveFile.writeText(data)
                 }
             }
@@ -153,7 +171,8 @@ class MainActivity : ComponentActivity() {
 
                     if (MainService.totalDiskSpace > 0L) {
                         var servicePercent =
-                            (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() / MainService.totalDiskSpace.toDouble()
+                            (MainService.totalDiskSpace - MainService.freeSpaceLeft).toDouble() /
+                                    MainService.totalDiskSpace.toDouble()
 
                         if (MainService.freeSpaceLeft < 0L) {
                             servicePercent = -1.0
@@ -230,22 +249,7 @@ class MainActivity : ComponentActivity() {
     private val repeatOptions = ArrayList<String>()
     private var isReady = false
 
-    private lateinit var isRunning: MutableState<Boolean>
-    private lateinit var serviceRunning: MutableState<Boolean>
-    private lateinit var waiting: MutableState<Boolean>
-    private lateinit var needsPermissions: MutableState<Boolean>
 
-    private lateinit var driveIndex: MutableIntState
-    private lateinit var repeatIndex: MutableIntState
-
-    private lateinit var runCount: MutableIntState
-    private lateinit var runIndex: MutableIntState
-
-    private lateinit var percent: MutableDoubleState
-    private lateinit var freeSpace: MutableLongState
-
-    private lateinit var lastCompleteTimestamp: MutableLongState
-    private lateinit var lastCompleteRunCount: MutableIntState
 
     @Composable
     fun FreeDiskShredder() {
