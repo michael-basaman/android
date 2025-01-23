@@ -34,6 +34,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.anticirculatory.freediskshredder.ui.theme.FreeDiskShredderTheme
@@ -69,6 +71,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var lastCompleteTimestamp: MutableLongState
     private lateinit var lastCompleteRunCount: MutableIntState
+
+    private lateinit var aboutDetails: MutableState<Boolean>
 
     override fun onDestroy() {
         super.onDestroy()
@@ -270,6 +274,8 @@ class MainActivity : ComponentActivity() {
         lastCompleteTimestamp = remember { mutableLongStateOf(0L) }
         lastCompleteRunCount = remember { mutableIntStateOf(1) }
 
+        aboutDetails = remember { mutableStateOf(true) }
+
         val driveNames: List<String> = MainUtils.getDriveNames()
 
         driveOptions.clear()
@@ -295,11 +301,8 @@ class MainActivity : ComponentActivity() {
                     ProgressBar()
                     ProgressText()
                 }
-                Surface(
-                    color = colorScheme.background,
-                    modifier = Modifier
-                        .fillMaxSize()
-                ) { }
+                AboutScreen()
+
             }
         }
     }
@@ -308,6 +311,64 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun FreeDiskShredderPreview() {
         FreeDiskShredder()
+    }
+
+    @Composable
+    fun AboutScreen() {
+        val aboutText: String = if(aboutDetails.value) {
+            "This app writes random bytes to your memory disk until it is full. " +
+                    "It then deletes the files it has created. " +
+                    "This process overwrites any leftover traces of previously deleted files."
+
+        } else {
+            "About"
+        }
+
+        val aboutSize: TextUnit = if(aboutDetails.value) {
+            12.sp
+        } else {
+            24.sp
+        }
+
+        Surface(
+            color = colorScheme.background,
+            border = BorderStroke(
+                width = 1.dp,
+                color = colorScheme.primary
+            ),
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable() {
+                    aboutDetails.value = !aboutDetails.value
+                }
+        ) {
+            Column {
+                Text(
+                    text = " ",
+                    fontSize = 12.sp,
+                )
+                Row {
+                    Text(
+                        text = " ",
+                        fontSize = 24.sp,
+                        color = colorScheme.primary
+                    )
+                    Text(
+                        text = aboutText,
+                        fontSize = 24.sp
+                    )
+                    Text(
+                        text = " ",
+                        fontSize = 24.sp,
+                        color = colorScheme.primary
+                    )
+                }
+                Text(
+                    text = " ",
+                    fontSize = 12.sp,
+                )
+            }
+        }
     }
 
     @Composable
@@ -431,8 +492,8 @@ class MainActivity : ComponentActivity() {
                     }
                 },
             border = BorderStroke(
-                    width=1.dp,
-            color = colorScheme.primary),
+                width=1.dp,
+                color = colorScheme.primary),
         ) {
             Column {
                 Surface(
